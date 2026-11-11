@@ -115,7 +115,7 @@ async function pullNation(src) {
 async function pullRegion(src) {
   const x = await nsApi({ region: slug(src.target), q: 'name delegate numnations happenings messages', limit: 100 });
   if (!x.querySelector('REGION')) throw new Error('NationStates couldn’t find that region.');
-  src.profile = `Region ${xt(x, 'NAME')}: ${xt(x, 'NUMNATIONS')} nations, WA delegate ${pretty(xt(x, 'DELEGATE')) || 'none'}.`;
+  src.profile = `Region ${xt(x, 'NAME')}: ${xt(x, 'NUMNATIONS')} nations, WA delegate ${['', '0'].includes(xt(x, 'DELEGATE')) ? 'none' : pretty(xt(x, 'DELEGATE'))}.`;
   const posts = [...x.querySelectorAll('MESSAGES > POST')]
     .filter(p => !['2', '9'].includes(xt(p, 'STATUS')))
     .map(p => ({ id: 'm' + p.getAttribute('id'), time: +xt(p, 'TIMESTAMP') * 1000, author: pretty(xt(p, 'NATION')), text: cleanNS(xt(p, 'MESSAGE')) }));
