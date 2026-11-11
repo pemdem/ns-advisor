@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Office of the Head of State</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=JetBrains+Mono:wght@400;600;700&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="banner">
+  <div class="brand">
+    <img id="flag" class="flag" alt="" hidden>
+    <div class="brand-text">
+      <div id="pretitle" class="pretitle">Office of the Head of State</div>
+      <h1 id="nationName" class="typed">Situation Room</h1>
+      <div id="motto" class="motto"></div>
+    </div>
+    <span class="stamp">TOP SECRET</span>
+  </div>
+  <div class="top-actions">
+    <span id="nationLine" class="mono dim"></span>
+    <button id="syncAll" class="btn amber">Request new reports</button>
+    <button id="openSettings" class="btn ghost">Settings</button>
+  </div>
+</header>
+<div id="statbar" class="statbar mono" hidden></div>
+
+<div class="layout">
+  <nav class="files" aria-label="Case files">
+    <h2 class="label">Case files</h2>
+    <div id="fileList"></div>
+    <button id="addFile" class="linkish">+ Open a new file</button>
+  </nav>
+
+  <main id="file" class="sheet" aria-live="polite"></main>
+
+  <aside class="council" aria-label="Advisors">
+    <h2 class="label">Memoranda to the Leader</h2>
+    <div id="briefs"></div>
+    <div id="options" class="option-row"></div>
+    <div id="chat" class="chat"></div>
+    <form id="directiveForm" class="directive">
+      <label for="directive">Your directive</label>
+      <div class="row">
+        <input id="directive" autocomplete="off" placeholder="Write to your cabinet…">
+        <button class="btn amber" type="submit">Send</button>
+      </div>
+    </form>
+  </aside>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<dialog id="settingsDlg">
+  <form method="dialog" id="settingsForm" class="dlg">
+    <h2 class="typed">Settings</h2>
+    <label for="sNation">Your nation</label>
+    <input id="sNation" placeholder="e.g. New French Union">
+    <label for="sKey">Gemini API key</label>
+    <input id="sKey" type="password" autocomplete="off" placeholder="Stored only in this browser">
+    <p class="hint">Get one at aistudio.google.com. It never leaves this device except to call Google.</p>
+    <label for="sModel">Gemini model</label>
+    <div class="row">
+      <select id="sModel"></select>
+      <button type="button" id="loadModels" class="btn ghost">Load models</button>
+    </div>
+    <label for="sLore">Nation background (constitution, doctrine, allies, rivals)</label>
+    <textarea id="sLore" rows="5" placeholder="Anything your advisors should always know."></textarea>
+    <fieldset>
+      <legend>Advisors</legend>
+      <div id="advisorEdit"></div>
+      <button type="button" id="addAdvisor" class="linkish">+ Add advisor</button>
+    </fieldset>
+    <label for="sProxy">Forum proxy (optional, for RP threads)</label>
+    <input id="sProxy" placeholder="https://your-worker.workers.dev/?url=">
+    <p class="hint">Needed to read forum.nationstates.net threads from a browser. See the README for a free one-file setup.</p>
+    <fieldset>
+      <legend>Move to another device</legend>
+      <div class="row wrap">
+        <button type="button" id="exportBtn" class="btn ghost">Export setup</button>
+        <label class="btn ghost filebtn">Import setup<input type="file" id="importFile" accept="application/json"></label>
+      </div>
+      <p class="hint">Export saves your files, event chains and advisors (not your API key) to a file you can import on your phone or laptop.</p>
+    </fieldset>
+    <div class="row end">
+      <button value="cancel" class="btn ghost">Close</button>
+      <button id="saveSettings" value="save" class="btn dark">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="addDlg">
+  <form method="dialog" id="addForm" class="dlg">
+    <h2 class="typed">Open a new file</h2>
+    <label for="aType">Type</label>
+    <select id="aType">
+      <option value="nation">Nation (happenings)</option>
+      <option value="region">Region (RMB + happenings)</option>
+      <option value="thread">Forum RP thread</option>
+      <option value="paste">Pasted intel (Discord, dispatches, anything)</option>
+    </select>
+    <label for="aTarget" id="aTargetLabel">Nation name</label>
+    <input id="aTarget">
+    <label for="aName">File name</label>
+    <input id="aName" placeholder="e.g. Baltic Standoff">
+    <div class="row end">
+      <button value="cancel" class="btn ghost">Cancel</button>
+      <button id="addConfirm" value="add" class="btn dark">Open file</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,113 @@
+/* War Room desk (A) + Classified Dossier paper (B) + NationStates-style nation banner */
+:root{
+  --desk:#0b0f0c; --desk2:#121915; --deskline:#23302a; --deskline2:#3a4a41;
+  --light:#d7e3da; --dim:#9fb0a5; --amber:#f2b33d;
+  --manila:#d9cfb4; --paper:#f4eedd; --note:#fffbe8; --tab:#ecdfb8;
+  --ink:#1f1b16; --muted:#4f4637; --line:#b4a47c; --dash:#8c7f62; --stamp:#a3271f;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--desk);color:var(--light);font-family:'Courier Prime','Courier New',monospace;font-size:15px}
+body{background-image:linear-gradient(var(--desk2) 1px,transparent 1px),linear-gradient(90deg,var(--desk2) 1px,transparent 1px);background-size:40px 40px}
+a{color:var(--amber)}
+.typed{font-family:'Special Elite','Courier New',monospace;font-weight:400;margin:0}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+.dim{color:var(--dim);font-size:12px;letter-spacing:.06em}
+.muted{color:var(--muted);font-size:13px}
+.label{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--amber);margin:0 0 4px}
+button{font-family:inherit;font-size:14px;cursor:pointer}
+input,select,textarea{font-family:inherit;font-size:15px;color:var(--ink);background:var(--note);border:1px solid var(--dash);padding:10px 12px;border-radius:0;width:100%}
+input:focus,select:focus,textarea:focus,button:focus-visible,.file-tab:focus-visible{outline:3px solid var(--amber);outline-offset:1px}
+
+/* Nation banner */
+.banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px 20px;padding:16px 24px;background:#0f1511;border-bottom:2px solid var(--amber)}
+.brand{display:flex;flex-wrap:wrap;align-items:center;gap:16px;min-width:0}
+.flag{height:64px;width:auto;max-width:110px;object-fit:contain;border:2px solid var(--paper);box-shadow:3px 3px 0 #000;background:#000}
+.brand-text{min-width:0}
+.pretitle{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.brand h1{font-size:28px;color:var(--paper);line-height:1.15}
+.motto{font-style:italic;color:var(--dim);font-size:14px;margin-top:2px}
+.stamp{font-family:'Special Elite',monospace;color:#ff6b5e;border:2px solid #ff6b5e;padding:3px 9px;transform:rotate(-4deg);letter-spacing:.1em;font-size:13px}
+.top-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.statbar{display:flex;flex-wrap:wrap;gap:6px 22px;padding:8px 24px;background:var(--desk2);border-bottom:1px solid var(--deskline);font-size:12px;color:var(--dim);letter-spacing:.06em}
+.statbar b{color:var(--light);font-weight:600}
+
+.btn{min-height:44px;padding:0 16px;border:1px solid var(--ink);background:transparent;color:var(--ink)}
+.btn.dark{background:var(--ink);color:var(--paper);font-weight:700}
+.btn.amber{background:var(--amber);border-color:var(--amber);color:var(--desk);font-weight:700;font-family:'JetBrains Mono',monospace;font-size:13px;letter-spacing:.04em}
+.btn.red{background:var(--stamp);border-color:var(--stamp);color:var(--note);font-weight:700}
+.btn.ghost{background:transparent}
+.banner .btn.ghost,.council .btn.ghost{color:var(--light);border-color:var(--deskline2)}
+.btn:disabled{opacity:.55;cursor:wait}
+.linkish{background:none;border:0;color:var(--amber);text-decoration:underline;padding:10px 0;text-align:left;min-height:44px}
+.sheet .linkish,.dlg .linkish{color:#8a1f18}
+
+.layout{display:flex;flex-wrap:wrap;gap:22px;padding:22px 24px;align-items:flex-start}
+.files{flex:1 1 210px;display:flex;flex-direction:column;gap:8px}
+.file-tab{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;min-height:44px;padding:8px 14px;background:var(--tab);border:1px solid var(--line);border-radius:0 10px 0 0;color:var(--ink);text-align:left;font-size:14px}
+.file-tab.on{background:var(--paper);border-color:var(--amber);box-shadow:-4px 0 0 var(--amber);font-weight:700}
+.file-tab .kind{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.08em;color:var(--muted);white-space:nowrap}
+.file-tab .new{background:var(--stamp);color:var(--note);font-size:11px;padding:1px 6px;margin-left:6px}
+
+.sheet{flex:999 1 520px;min-width:0;background:var(--paper);color:var(--ink);border:1px solid var(--line);box-shadow:6px 6px 0 #000;padding:22px 26px;display:flex;flex-direction:column;gap:16px}
+.sheet-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px;border-bottom:1px solid var(--ink);padding-bottom:10px}
+.sheet-head h2{font-size:26px}
+.sheet-actions{display:flex;flex-wrap:wrap;gap:8px}
+.profile{font-size:14px;color:var(--muted);margin:0}
+.event{display:flex;gap:16px;padding-left:4px}
+.event .no{flex:0 0 64px;font-family:'Special Elite',monospace;color:var(--stamp);font-size:14px}
+.event .body{flex:1;min-width:0;border-left:2px solid var(--line);padding-left:14px}
+.event .title{font-weight:700;font-size:16px}
+.event .detail{margin-top:4px;font-size:14px;line-height:1.55}
+.event .meta{margin-top:6px;font-size:12px;color:var(--muted)}
+.empty{color:var(--muted);line-height:1.6}
+.council .empty{color:var(--dim)}
+.summary{background:var(--note);border:1px dashed var(--dash);padding:12px 14px;font-size:14px;line-height:1.55;white-space:pre-wrap}
+details.raw{border-top:1px dashed var(--dash);padding-top:10px}
+details summary{cursor:pointer;min-height:32px}
+details.raw summary{font-weight:700}
+.raw-item{font-size:13px;line-height:1.5;padding:8px 0;border-bottom:1px dotted var(--line);white-space:pre-wrap;overflow-wrap:anywhere}
+.raw-item .who{font-weight:700}
+.paste textarea{min-height:120px}
+
+.council{flex:1 1 300px;display:flex;flex-direction:column;gap:12px}
+.memo{background:var(--note);color:var(--ink);border:1px solid var(--line);padding:12px 14px;box-shadow:3px 3px 0 #000}
+.memo .from{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.memo .text{margin-top:6px;font-size:14px;line-height:1.5;white-space:pre-wrap}
+.option-row{display:flex;flex-wrap:wrap;gap:8px}
+.chat{display:flex;flex-direction:column;gap:10px}
+.msg-you{align-self:flex-end;max-width:90%;background:var(--amber);color:var(--desk);padding:10px 12px;font-size:14px;line-height:1.45;white-space:pre-wrap;font-weight:700}
+.directive{display:flex;flex-direction:column;gap:6px}
+.directive label{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--amber)}
+.directive input{background:#0f1511;color:var(--light);border-color:var(--deskline2)}
+.directive input::placeholder{color:var(--dim)}
+.row{display:flex;gap:8px;align-items:center}
+.row.wrap{flex-wrap:wrap}
+.row.end{justify-content:flex-end;margin-top:8px}
+.row input,.row select{flex:1;min-width:0}
+
+dialog{border:1px solid var(--ink);background:var(--paper);color:var(--ink);padding:0;max-width:min(560px,94vw);width:100%;box-shadow:6px 6px 0 #000}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+.dlg{display:flex;flex-direction:column;gap:8px;padding:22px}
+.dlg h2{font-size:22px;margin-bottom:6px}
+.dlg label{font-weight:700;font-size:13px;margin-top:6px}
+.hint{font-size:12px;color:var(--muted);margin:0}
+fieldset{border:1px dashed var(--dash);padding:10px 12px;margin:8px 0 0;display:flex;flex-direction:column;gap:8px}
+legend{font-weight:700;font-size:13px;padding:0 4px}
+.adv{display:flex;flex-direction:column;gap:6px;padding-bottom:8px;border-bottom:1px dotted var(--line)}
+.adv .row button{flex:0 0 auto}
+.filebtn{display:inline-flex;align-items:center;position:relative}
+.filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}
+
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--amber);color:var(--desk);font-weight:700;padding:12px 16px;max-width:90vw;font-size:14px;display:none;z-index:10;box-shadow:4px 4px 0 #000}
+#toast.show{display:block}
+.spin::after{content:' …';animation:dots 1s steps(3,end) infinite}
+@keyframes dots{0%{content:' .'}33%{content:' ..'}66%{content:' ...'}}
+@media (max-width:640px){
+  .layout{padding:14px;gap:16px}
+  .banner{padding:14px}
+  .statbar{padding:8px 14px}
+  .sheet{padding:16px}
+  .event .no{flex-basis:44px}
+  .brand h1{font-size:22px}
+  .flag{height:48px}
+}
