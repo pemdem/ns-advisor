@@ -60,22 +60,6 @@ summary{cursor:pointer}
 
 /* ---------- Full-screen layout ---------- */
 .layout{display:grid;grid-template-columns:190px minmax(0,1fr) 360px;gap:14px;padding:14px 16px}
-@media (min-width:1000px){
-  html,body{height:100%;overflow:hidden}
-  body{display:flex;flex-direction:column}
-  .layout{flex:1;min-height:0}
-  .col{min-height:0;overflow:auto}
-  .council{min-height:0;overflow:hidden;display:flex;flex-direction:column}
-}
-@media (min-width:1400px){
-  .layout{grid-template-columns:200px minmax(0,1fr) 340px 320px}
-  .council{display:contents}
-  .panel-tabs{display:none}
-  .council .panel[hidden]{display:flex !important}
-  .panel-title{display:block}
-  #panel-council,#panel-forces{min-height:0;overflow:hidden}
-}
-
 /* Case files */
 .files{display:flex;flex-direction:column;gap:6px}
 .file-list{display:flex;flex-direction:column;gap:6px}
@@ -233,3 +217,21 @@ legend{font-weight:700;font-size:13px;padding:0 4px}
   .sheet{padding:14px}
   .sheet-head h2{font-size:21px}
 }
+
+/* ---------- Full-height desktop layout (kept last so it wins over the base rules) ---------- */
+@media (min-width:1000px){
+  html,body{height:100%;overflow:hidden}
+  body{display:flex;flex-direction:column}
+  .layout{flex:1;min-height:0}
+  .col{min-height:0;overflow:auto}
+  .council{min-height:0;overflow:hidden;display:flex;flex-direction:column}
+}
+@media (min-width:1400px){
+  .layout{grid-template-columns:200px minmax(0,1fr) 340px 320px}
+  .council{display:contents}
+  .panel-tabs{display:none}
+  .council .panel[hidden]{display:flex !important}
+  .panel-title{display:block}
+  #panel-council,#panel-forces{min-height:0;overflow:hidden}
+}
+
