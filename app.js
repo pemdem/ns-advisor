@@ -879,7 +879,7 @@ async function autoDossiers() {
     state.sources.forEach(src => (src.military || []).forEach(m => names.set(canonKey(m.nation), m.nation)));
     for (const [k, name] of names) {
       const rec = state.profiles?.[k];
-      const stale = !rec?.profile ? !(rec?.failedAt && Date.now() - rec.failedAt < 24 * 3600e3) : Date.now() - (rec.at || 0) > 7 * 24 * 3600e3;
+      const stale = !rec?.profile ? !(rec?.failedAt && Date.now() - rec.failedAt < 24 * 3600e3) : (Date.now() - (rec.at || 0) > 7 * 24 * 3600e3 || !Array.isArray(rec.profile.aka));
       if (!stale || busy.has('profile:' + k)) continue;
       busy.add('profile:' + k);
       try { await buildProfile(name, k === slug(state.settings.nation), true); } catch (e) { /* no material yet: retried tomorrow */ }
