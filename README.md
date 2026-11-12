@@ -13,6 +13,7 @@ Live site: https://pemdem.github.io/ns-advisor/
 Your key and data stay in that browser only. To move to another device, use **Settings › Export setup** and import the file there, then re-enter your key.
 
 ## Reading forum RP threads
+Already set up: the proxy runs at `https://ns-forum-proxy.demariepeter7.workers.dev/?url=` (Cloudflare Workers, free tier) and is saved in Settings. If you ever need to rebuild it, follow the steps below.
 Browsers aren't allowed to read forum.nationstates.net pages directly from another site. To fix that, set up a tiny free proxy once:
 
 1. Make a free account at dash.cloudflare.com and go to **Workers & Pages › Create › Worker**.
