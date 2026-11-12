@@ -190,10 +190,36 @@ async function syncSource(src) {
 }
 
 /* ---------- Gemini ---------- */
-async function gemini(prompt) {
+async function fetchModels(key) {
+  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': key } });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error('Gemini: ' + (data.error?.message || r.status));
+  return (data.models || [])
+    .filter(m => (m.supportedGenerationMethods || []).includes('generateContent') && /gemini/.test(m.name) && !/(image|tts|audio|live|embedding|vision)/i.test(m.name))
+    .map(m => m.name.replace(/^models\//, ''));
+}
+
+async function gemini(prompt, retried) {
   const key = state.settings.geminiKey.trim();
   if (!key) throw new Error('Add your Gemini API key in Settings first.');
-  const model = (state.settings.model || 'gemini-2.5-flash').replace(/^models\//, '');
+  if (!state.settings.model) {
+    state.settings.model = pickDefaultModel(await fetchModels(key)); save();
+  }
+  try { return await geminiCall(key, state.settings.model.replace(/^models\//, ''), prompt); }
+  catch (e) {
+    // Google retires models over time. If ours is gone, switch to the newest flash model and retry once.
+    if (retried || !e.modelGone) throw e;
+    const models = await fetchModels(key);
+    const suggested = (e.message.match(/models\/(gemini-[\w.-]+)/g) || []).map(s => s.replace('models/', '')).find(m => m !== state.settings.model && models.includes(m));
+    const next = suggested || pickDefaultModel(models);
+    if (!next || next === state.settings.model) throw e;
+    state.settings.model = next; save();
+    toast('Switched advisors to ' + next + ' (the old model was retired).');
+    return gemini(prompt, true);
+  }
+}
+
+async function geminiCall(key, model, prompt) {
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
@@ -203,7 +229,10 @@ async function gemini(prompt) {
     })
   });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error('Gemini: ' + (data.error?.message || r.status));
+  if (!r.ok) {
+    const msg = data.error?.message || String(r.status);
+    throw Object.assign(new Error('Gemini: ' + msg), { modelGone: r.status === 404 || /no longer available|not found|deprecated|not supported for generateContent/i.test(msg) });
+  }
   const text = (data.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
   if (!text) throw new Error('Gemini returned nothing (it may have blocked the content). Try again.');
   try { return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '')); }
@@ -213,18 +242,15 @@ async function gemini(prompt) {
 async function listModels() {
   const key = state.settings.geminiKey.trim() || $('#sKey').value.trim();
   if (!key) { toast('Enter your Gemini key first.'); return; }
-  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': key } });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) { toast('Gemini: ' + (data.error?.message || r.status)); return; }
-  const models = (data.models || [])
-    .filter(m => (m.supportedGenerationMethods || []).includes('generateContent') && /gemini/.test(m.name) && !/(image|tts|audio|live|embedding|vision)/i.test(m.name))
-    .map(m => m.name.replace(/^models\//, ''));
-  fillModelSelect(models, $('#sModel').value || pickDefaultModel(models));
-  toast(models.length + ' models loaded.');
+  let models;
+  try { models = await fetchModels(key); } catch (e) { toast(e.message, 8000); return; }
+  const cur = $('#sModel').value;
+  fillModelSelect(models, models.includes(cur) ? cur : pickDefaultModel(models));
+  toast(models.length + ' models loaded. Newest flash model selected; press Save.');
 }
 function pickDefaultModel(models) {
   const flash = models.filter(m => /^gemini-[\d.]+-flash$/.test(m)).sort((a, b) => parseFloat(b.split('-')[1]) - parseFloat(a.split('-')[1]));
-  return flash[0] || models.find(m => /flash/.test(m)) || models[0] || 'gemini-2.5-flash';
+  return flash[0] || models.find(m => /flash/.test(m) && !/lite|preview|exp/.test(m)) || models.find(m => /flash/.test(m)) || models[0] || '';
 }
 function fillModelSelect(models, selected) {
   const list = [...new Set([selected, ...models].filter(Boolean))];
@@ -604,7 +630,7 @@ function renderCouncil() {
 function openSettings() {
   const s = state.settings;
   $('#sNation').value = s.nation; $('#sKey').value = s.geminiKey; $('#sLore').value = s.lore; $('#sProxy').value = s.proxy;
-  fillModelSelect([], s.model || 'gemini-2.5-flash');
+  fillModelSelect([], s.model);
   renderAdvisorEdit(s.advisors);
   $('#settingsDlg').showModal();
 }
