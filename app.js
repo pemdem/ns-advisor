@@ -288,6 +288,7 @@ ${items.map(i => `[${i.time ? new Date(i.time).toISOString().slice(0, 16).replac
 Current military standings in this case (update these):
 ${militaryLines(src)}
 
+${factbookBlock((src.military || []).map(m => m.nation))}
 Reply with JSON only, in exactly this shape:
 {"military":[${MILITARY_SHAPE}],
 "events":[{"title":"short headline","detail":"1-2 sentences: what happened and why it matters to us","actor":"who did it","tag":"Escalation | Diplomacy | Intel | Military | Economy | Domestic | Ultimatum | Other"}],
@@ -314,6 +315,7 @@ function cleanMilitary(list) {
 }
 
 async function reassessMilitary(src) {
+  await refreshFactbooks((src.military || []).map(m => m.nation));
   const out = await gemini(`${councilBlock()}
 
 ${sourceContext(src)}
@@ -324,10 +326,63 @@ ${src.raw.slice(-40).map(i => `${i.author}: ${i.text.slice(0, 1500)}`).join('\n\
 Current military standings in this case (update these):
 ${militaryLines(src)}
 
+${factbookBlock((src.military || []).map(m => m.nation))}
 ${militaryRules()}
 Reply with JSON only: {"military":[${MILITARY_SHAPE}]}`);
   const m = cleanMilitary(out.military);
   if (m.length) { src.military = m; src.militaryAt = Date.now(); }
+}
+
+/* Military factbooks the leader attaches to a nation (kept per nation, shared by every file) */
+const cleanBB = t => String(t || '').replace(/\[\/?[a-z*][^\]]*\]/gi, ' ').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+function dispatchId(url) {
+  const m = /nationstates\.net/i.test(url) && String(url).match(/(?:\bid=|dispatchid=)(\d+)/);
+  return m ? m[1] : null;
+}
+async function fetchDispatch(fb) {
+  const x = await nsApi({ q: 'dispatch', dispatchid: fb.dispatch });
+  const text = cleanBB(cleanNS(xt(x, 'TEXT')));
+  if (!text) throw new Error('that dispatch is empty or doesn’t exist');
+  Object.assign(fb, { title: xt(x, 'TITLE') || fb.title, text, author: pretty(xt(x, 'AUTHOR')), kind: [xt(x, 'CATEGORY'), xt(x, 'SUBCATEGORY')].filter(Boolean).join(' › '), at: Date.now() });
+}
+async function addFactbook(nation) {
+  const raw = prompt(`Factbook link for ${nation}\n(a NationStates dispatch link, or any other link):`);
+  if (!raw || !raw.trim()) return;
+  let url;
+  try { url = new URL(raw.trim()); if (!/^https?:$/.test(url.protocol)) throw 0; }
+  catch (e) { toast('That doesn’t look like a link.'); return; }
+  state.factbooks = state.factbooks || {};
+  const list = state.factbooks[slug(nation)] = state.factbooks[slug(nation)] || [];
+  if (list.some(f => f.url === url.href)) { toast('That factbook is already attached.'); return; }
+  const fb = { url: url.href, title: '', text: '', at: Date.now(), dispatch: dispatchId(url.href) };
+  if (fb.dispatch) {
+    toast('Reading the factbook…', 15000);
+    try { await fetchDispatch(fb); }
+    catch (e) { toast('Couldn’t read that dispatch: ' + e.message, 8000); return; }
+  } else {
+    const t = prompt('Your advisors can’t open that site directly. Paste the factbook text here so they can read it (or leave blank to keep just the link):');
+    fb.text = cleanBB(t || '');
+    fb.title = url.hostname.replace(/^www\./, '');
+  }
+  list.push(fb); save(); renderOrbat();
+  toast(`Factbook attached to ${nation}.` + (current() ? ' Press Reassess forces to factor it in.' : ''));
+}
+async function refreshFactbooks(nations) {
+  for (const n of nations) for (const fb of state.factbooks?.[slug(n)] || []) {
+    if (fb.dispatch && Date.now() - (fb.at || 0) > 24 * 3600e3) { try { await fetchDispatch(fb); } catch (e) { /* keep the old copy */ } }
+  }
+  save();
+}
+function factbookBlock(nations) {
+  let budget = 40000;
+  const parts = [];
+  for (const n of nations) for (const fb of state.factbooks?.[slug(n)] || []) {
+    const body = fb.text ? fb.text.slice(0, Math.min(10000, budget)) : `(link only, not readable: ${fb.url})`;
+    budget -= body.length;
+    parts.push(`--- ${n}: “${fb.title || 'Factbook'}”${fb.kind ? ' (' + fb.kind + ')' : ''} ---\n${body}`);
+    if (budget <= 0) break;
+  }
+  return parts.length ? `MILITARY FACTBOOKS the nations published about themselves. These are their own claims: use them for force sizes, equipment and doctrine, but they may be exaggerated or out of date, and what actually happens in the RP overrides them.\n${parts.join('\n\n')}\n` : '';
 }
 
 /* Official NationStates "Defense Forces" census (scale 46), cached 12 h per nation */
@@ -366,7 +421,10 @@ function sourceContext(src) {
 ${src.profile ? 'Context: ' + src.profile + '\n' : ''}Running summary: ${src.summary || '(none yet)'}
 Latest events:
 ${src.events.slice(-15).map(eventLine).join('\n') || '(none)'}
-Your latest briefs: ${(src.briefs || []).map(b => b.role + ': ' + b.brief).join(' | ') || '(none)'}`;
+Your latest briefs: ${(src.briefs || []).map(b => b.role + ': ' + b.brief).join(' | ') || '(none)'}
+Military standings:
+${militaryLines(src)}
+${factbookBlock((src.military || []).map(m => m.nation))}`;
   return Object.assign(new String(c), { chat: src.chat });
 }
 function overviewContext() {
@@ -379,6 +437,7 @@ ${state.sources.map(s => `== ${s.name} (${TYPE_LABEL[s.type]}) ==\n${s.summary |
 async function analyze(src) {
   const pending = src.raw.filter(i => !i.analyzed);
   if (!pending.length) { toast('No new intel to analyze in this file.'); return; }
+  await refreshFactbooks((src.military || []).map(m => m.nation));
   // Split very large backlogs so each request stays a sensible size.
   const chunks = []; let cur = [], size = 0;
   for (const i of pending) {
@@ -502,6 +561,13 @@ function renderOrbat() {
           ${m.assets ? `<div class="rank-meta">${esc(m.assets)}</div>` : ''}
           ${m.note ? `<div class="rank-note">${esc(m.note)}</div>` : ''}
           ${ns ? `<div class="rank-ns mono">${esc(ns)}</div>` : ''}
+          <div class="fb-list">
+            ${(state.factbooks?.[slug(m.nation)] || []).map((f, j) => `<span class="fb-chip">
+              <a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" title="${esc(f.kind || 'Opens in a new tab')}">${esc(f.title || 'Factbook')}</a>${f.text ? '' : '<span class="fb-warn" title="Advisors can’t read this link"> (link only)</span>'}
+              <button class="fb-x" data-fbrm="${esc(slug(m.nation))}|${j}" aria-label="Remove factbook ${esc(f.title || '')}">×</button>
+            </span>`).join('')}
+            <button class="fb-add" data-fbadd="${esc(m.nation)}">+ Factbook</button>
+          </div>
           ${m.file && !src ? `<div class="rank-ns mono">FILE: ${esc(m.file)}</div>` : ''}
         </div>
       </li>`;
@@ -703,6 +769,16 @@ document.addEventListener('click', e => {
   if (tab) { state.selected = tab.dataset.tab; save(); render(); $('#file').scrollIntoView({ block: 'nearest' }); return; }
   const opt = e.target.closest('[data-option]');
   if (opt) { if (!busy.has('chat')) sendDirective('I’m considering: ' + opt.dataset.option + '. Advise me.'); return; }
+  const fbAdd = e.target.closest('[data-fbadd]');
+  if (fbAdd) { addFactbook(fbAdd.dataset.fbadd); return; }
+  const fbRm = e.target.closest('[data-fbrm]');
+  if (fbRm) {
+    const [k, j] = fbRm.dataset.fbrm.split('|');
+    const list = state.factbooks?.[k] || [];
+    const f = list[+j];
+    if (f && confirm(`Remove “${f.title || 'this factbook'}”?`)) { list.splice(+j, 1); save(); renderOrbat(); }
+    return;
+  }
   const rm = e.target.closest('[data-rm]');
   if (rm) { const list = readAdvisorEdit(); list.splice(+rm.dataset.rm, 1); renderAdvisorEdit(list); return; }
   const act = e.target.closest('[data-act]')?.dataset.act;

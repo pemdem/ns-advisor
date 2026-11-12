@@ -66,6 +66,12 @@ input:focus,select:focus,textarea:focus,button:focus-visible,.file-tab:focus-vis
 .rank-meta{font-size:13px;color:var(--light);line-height:1.4}
 .rank-note{font-size:12px;color:var(--dim);line-height:1.4;margin-top:2px;font-style:italic}
 .rank-ns{font-size:10px;letter-spacing:.06em;color:var(--dim);margin-top:4px}
+.fb-list{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
+.fb-chip{display:inline-flex;align-items:center;gap:2px;background:var(--tab);color:var(--ink);border:1px solid var(--line);padding:0 0 0 8px;font-size:12px;max-width:100%}
+.fb-chip a{color:var(--ink);text-decoration:underline;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px;padding:8px 0}
+.fb-warn{color:var(--muted);font-size:11px;white-space:nowrap}
+.fb-x{background:none;border:0;color:var(--ink);font-size:16px;min-width:36px;min-height:36px;line-height:1}
+.fb-add{background:none;border:1px dashed var(--deskline2);color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.06em;min-height:36px;padding:0 10px}
 .btn.small{min-height:44px;padding:0 12px;font-size:13px}
 .files .btn.ghost{color:var(--light);border-color:var(--deskline2)}
 
