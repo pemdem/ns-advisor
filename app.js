@@ -288,7 +288,6 @@ ${items.map(i => `[${i.time ? new Date(i.time).toISOString().slice(0, 16).replac
 Current military standings in this case (update these):
 ${militaryLines(src)}
 
-${factbookBlock((src.military || []).map(m => m.nation))}
 Reply with JSON only, in exactly this shape:
 {"military":[${MILITARY_SHAPE}],
 "events":[{"title":"short headline","detail":"1-2 sentences: what happened and why it matters to us","actor":"who did it","tag":"Escalation | Diplomacy | Intel | Military | Economy | Domestic | Ultimatum | Other"}],
@@ -300,10 +299,51 @@ ${militaryRules()}`;
 }
 
 const MILITARY_SHAPE = '{"nation":"nation name as used in the RP","strength":0-100,"assets":"key forces in under 12 words","trend":"up | down | steady","note":"one short sentence: why"}';
-const MILITARY_RULES = `Military standings: list every nation that is an actor in this case, including "${'${us}'}" (our nation), ranked by current military strength in the RP (100 = overwhelming). Judge only from what the RP, the summary and the context say: posted force sizes, deployments, losses, alliances that commit troops. Keep a nation's previous strength when there is no new information. If a nation's forces are unknown, give your best estimate and say so in the note.`;
+const STRENGTH_SCALE = 'Use one absolute 0-100 scale for everyone: 10 = token defense force, 30 = small but capable military, 50 = solid regional power, 70 = major power, 85 = great power, 95+ = superpower.';
+const MILITARY_RULES = `Military standings: list every nation that is an actor in this case, including "${'${us}'}" (our nation). ${STRENGTH_SCALE}
+Nations marked [FACTBOOK] are rated from their published factbook by a separate process: list them, but copy their strength unchanged.
+Rate every other nation only from what the RP, the summary and the context say: posted force sizes, deployments, losses, alliances that commit troops. Keep a nation's previous strength when there is no new information. If a nation's forces are unknown, give your best estimate and say so in the note.`;
+
+/* Ratings for nations with a factbook come only from the factbook. */
+function fbSig(k) { return (state.factbooks?.[k] || []).filter(f => f.text).map(f => f.url + ':' + f.text.length).join('|'); }
+function fbScore(nation) {
+  const k = slug(nation), s = state.fbScores?.[k];
+  return s && s.sig && s.sig === fbSig(k) ? s : null;
+}
+function withFactbookScores(list) {
+  return (list || []).map(m => {
+    const s = fbScore(m.nation);
+    if (!s) return { ...m, basis: 'rp' };
+    const trend = s.prev == null || s.prev === s.strength ? 'steady' : s.strength > s.prev ? 'up' : 'down';
+    return { ...m, strength: s.strength, assets: s.assets, note: s.note, trend, basis: 'factbook' };
+  });
+}
+async function scoreFactbooks(nations, force) {
+  state.fbScores = state.fbScores || {};
+  const todo = [...new Set(nations.map(slug))].filter(k => fbSig(k) && (force || state.fbScores[k]?.sig !== fbSig(k)));
+  // Factbooks removed or emptied: drop their rating so the RP rating takes over again.
+  Object.keys(state.fbScores).forEach(k => { if (!fbSig(k)) delete state.fbScores[k]; });
+  if (!todo.length || !state.settings.geminiKey) { save(); return; }
+  const names = todo.map(k => nations.find(n => slug(n) === k) || pretty(k));
+  const out = await gemini(`You are a military analyst for a NationStates roleplay. Rate each nation's military strength using ONLY its published factbook below, as the nation describes itself. Ignore anything else you know.
+${STRENGTH_SCALE}
+
+${factbookBlock(names)}
+Reply with JSON only: {"forces":[{"nation":"name exactly as given above","strength":0-100,"assets":"key forces in under 12 words","note":"one short sentence on what the rating rests on"}]}`);
+  for (const f of Array.isArray(out.forces) ? out.forces : []) {
+    const k = slug(f.nation);
+    if (!todo.includes(k)) continue;
+    const strength = Math.max(0, Math.min(100, Math.round(Number(f.strength))));
+    if (Number.isNaN(strength)) continue;
+    const old = state.fbScores[k];
+    state.fbScores[k] = { strength, assets: String(f.assets || ''), note: String(f.note || ''), sig: fbSig(k), at: Date.now(), prev: old ? old.strength : null };
+  }
+  save();
+}
+
 function militaryLines(src) {
-  const m = src.military || [];
-  return m.length ? m.map(x => `- ${x.nation}: ${x.strength ?? '?'} (${x.assets || 'unknown'}; trend ${x.trend || 'steady'})`).join('\n') : '(none assessed yet)';
+  const m = withFactbookScores(src.military);
+  return m.length ? m.map(x => `- ${x.nation}${x.basis === 'factbook' ? ' [FACTBOOK]' : ''}: ${x.strength ?? '?'} (${x.assets || 'unknown'}; trend ${x.trend || 'steady'})`).join('\n') : '(none assessed yet)';
 }
 function militaryRules() { return MILITARY_RULES.replace('${us}', state.settings.nation || 'our nation'); }
 function cleanMilitary(list) {
@@ -315,10 +355,12 @@ function cleanMilitary(list) {
 }
 
 async function reassessMilitary(src) {
-  await refreshFactbooks((src.military || []).map(m => m.nation));
+  const nations = (src.military || []).map(m => m.nation);
+  await refreshFactbooks(nations);
+  await scoreFactbooks(nations, true);
   const out = await gemini(`${councilBlock()}
 
-${sourceContext(src)}
+${sourceContext(src, { noFactbooks: true })}
 
 Recent raw material (newest last):
 ${src.raw.slice(-40).map(i => `${i.author}: ${i.text.slice(0, 1500)}`).join('\n\n') || '(none)'}
@@ -326,7 +368,6 @@ ${src.raw.slice(-40).map(i => `${i.author}: ${i.text.slice(0, 1500)}`).join('\n\
 Current military standings in this case (update these):
 ${militaryLines(src)}
 
-${factbookBlock((src.military || []).map(m => m.nation))}
 ${militaryRules()}
 Reply with JSON only: {"military":[${MILITARY_SHAPE}]}`);
   const m = cleanMilitary(out.military);
@@ -365,13 +406,18 @@ async function addFactbook(nation) {
     fb.title = url.hostname.replace(/^www\./, '');
   }
   list.push(fb); save(); renderOrbat();
-  toast(`Factbook attached to ${nation}.` + (current() ? ' Press Reassess forces to factor it in.' : ''));
+  if (!fb.text) { toast(`Link saved for ${nation}. Advisors can't read it, so ${nation} stays rated from the RP.`, 8000); return; }
+  busy.add('mil'); renderOrbat(); toast(`Rating ${nation} from its factbook\u2026`, 30000);
+  try { await scoreFactbooks([nation], true); toast(`${nation} is now rated from its factbook.`); }
+  catch (e) { toast('Factbook saved, but rating failed: ' + e.message, 8000); }
+  finally { busy.delete('mil'); renderOrbat(); }
 }
 async function refreshFactbooks(nations) {
   for (const n of nations) for (const fb of state.factbooks?.[slug(n)] || []) {
     if (fb.dispatch && Date.now() - (fb.at || 0) > 24 * 3600e3) { try { await fetchDispatch(fb); } catch (e) { /* keep the old copy */ } }
   }
   save();
+  try { await scoreFactbooks(nations); } catch (e) { /* ratings retry next time */ }
 }
 function factbookBlock(nations) {
   let budget = 40000;
@@ -416,7 +462,7 @@ The leader now says: "${msg}"
 Answer as the council. Only the 1-3 members with something useful to say should speak. They may disagree with each other when that is realistic. Be concrete and brief (each reply under 90 words).
 Reply with JSON only: {"replies":[{"role":"council role exactly as written above","text":"what they say"}],"options":["optional: up to 4 follow-up courses of action, 2-5 words each"]}`;
 }
-function sourceContext(src) {
+function sourceContext(src, opts = {}) {
   const c = `CASE FILE: "${src.name}" (${TYPE_LABEL[src.type]})
 ${src.profile ? 'Context: ' + src.profile + '\n' : ''}Running summary: ${src.summary || '(none yet)'}
 Latest events:
@@ -424,7 +470,7 @@ ${src.events.slice(-15).map(eventLine).join('\n') || '(none)'}
 Your latest briefs: ${(src.briefs || []).map(b => b.role + ': ' + b.brief).join(' | ') || '(none)'}
 Military standings:
 ${militaryLines(src)}
-${factbookBlock((src.military || []).map(m => m.nation))}`;
+${opts.noFactbooks ? '' : factbookBlock((src.military || []).map(m => m.nation))}`;
   return Object.assign(new String(c), { chat: src.chat });
 }
 function overviewContext() {
@@ -526,55 +572,74 @@ Reply with JSON only: {"briefs":[{"role":"council role exactly as written above"
 /* ---------- rendering ---------- */
 function render() {
   const last = Math.max(0, ...state.sources.map(s => s.lastSync || 0));
-  $('#nationLine').textContent = !state.settings.nation ? 'SET YOUR NATION IN SETTINGS' : last ? 'LAST SYNC ' + fmtTime(last).toUpperCase() : 'NO REPORTS YET';
-  renderBanner(); renderFiles(); renderSheet(); renderCouncil(); renderOrbat();
+  $('#nationLine').textContent = !state.settings.nation ? 'SET YOUR NATION IN SETTINGS' : last ? 'SYNCED ' + fmtTime(last).toUpperCase() : 'NO REPORTS YET';
+  renderBanner(); renderFiles(); renderSheet(); renderPanels(); renderCouncil(); renderOrbat();
+}
+
+/* Side panel tabs: Council | Order of battle */
+let uiPanel = 'council';
+let uiPaste = null;
+function renderPanels() {
+  document.querySelectorAll('.panel-tabs [data-panel]').forEach(b => {
+    const on = b.dataset.panel === uiPanel;
+    b.setAttribute('aria-selected', on); b.classList.toggle('on', on); b.tabIndex = on ? 0 : -1;
+  });
+  $('#panel-council').hidden = uiPanel !== 'council';
+  $('#panel-forces').hidden = uiPanel !== 'forces';
 }
 
 /* Order of Battle: military ranking of every nation in the RP */
 function orbatList() {
   const src = current();
-  if (src) return { list: src.military || [], src };
+  if (src) return { list: withFactbookScores(src.military), src };
   const merged = new Map();
   state.sources.slice().sort((a, b) => (a.militaryAt || 0) - (b.militaryAt || 0))
     .forEach(s => (s.military || []).forEach(m => merged.set(slug(m.nation), { ...m, file: s.name })));
-  return { list: [...merged.values()], src: null };
+  return { list: withFactbookScores([...merged.values()]), src: null };
 }
+const openRanks = new Set();
 function renderOrbat() {
   const el = $('#orbat');
   const { list, src } = orbatList();
   const census = state.census || {};
   const us = [slug(state.settings.nation), slug(state.banner?.name)].filter(Boolean);
   const rows = list.slice().sort((a, b) => b.strength - a.strength || ((census[slug(b.nation)]?.score || 0) - (census[slug(a.nation)]?.score || 0)));
-  const arrow = { up: '▲', down: '▼', steady: '■' };
+  const arrow = { up: '▲', down: '▼', steady: '–' };
   const trendWord = { up: 'rising', down: 'falling', steady: 'steady' };
   el.innerHTML = `
-    <h2 class="label">Order of battle</h2>
-    <p class="dim orbat-sub">${src ? 'Military strength in ' + esc(src.name) : 'All RPs combined'}</p>
+    <p class="dim orbat-sub">${src ? esc(src.name) : 'All files combined'} · tap a nation for details</p>
     ${rows.length ? `<ol class="ranks">${rows.map((m, i) => {
-      const c = census[slug(m.nation)];
+      const k = slug(m.nation), c = census[k];
       const ns = c && !c.missing && c.score ? `NS Defense ${Math.round(c.score).toLocaleString()} · #${c.rank.toLocaleString()} world` : c?.missing ? 'Not a NationStates nation' : '';
-      return `<li class="rank-row ${us.includes(slug(m.nation)) ? 'us' : ''}">
-        <span class="rank-no">${i + 1}</span>
-        <div class="rank-body">
-          <div class="rank-top"><b>${esc(m.nation)}</b><span class="trend ${m.trend}" title="${trendWord[m.trend]}" aria-label="${trendWord[m.trend]}">${arrow[m.trend]}</span><span class="score">${m.strength}</span></div>
-          <div class="bar" aria-hidden="true"><span style="width:${m.strength}%"></span></div>
-          ${m.assets ? `<div class="rank-meta">${esc(m.assets)}</div>` : ''}
-          ${m.note ? `<div class="rank-note">${esc(m.note)}</div>` : ''}
-          ${ns ? `<div class="rank-ns mono">${esc(ns)}</div>` : ''}
-          <div class="fb-list">
-            ${(state.factbooks?.[slug(m.nation)] || []).map((f, j) => `<span class="fb-chip">
-              <a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" title="${esc(f.kind || 'Opens in a new tab')}">${esc(f.title || 'Factbook')}</a>${f.text ? '' : '<span class="fb-warn" title="Advisors can’t read this link"> (link only)</span>'}
-              <button class="fb-x" data-fbrm="${esc(slug(m.nation))}|${j}" aria-label="Remove factbook ${esc(f.title || '')}">×</button>
-            </span>`).join('')}
-            <button class="fb-add" data-fbadd="${esc(m.nation)}">+ Factbook</button>
+      const fbs = state.factbooks?.[k] || [];
+      return `<li class="rank ${us.includes(k) ? 'us' : ''}">
+        <details data-rank="${esc(k)}" ${openRanks.has(k) ? 'open' : ''}>
+          <summary>
+            <span class="rank-no">${i + 1}</span>
+            <span class="rank-name">${esc(m.nation)}</span>
+            <span class="basis ${m.basis}" title="${m.basis === 'factbook' ? 'Rated from its factbook' : 'Rated from RP posts'}">${m.basis === 'factbook' ? 'FB' : 'RP'}</span>
+            <span class="trend ${m.trend}" aria-label="${trendWord[m.trend]}">${arrow[m.trend]}</span>
+            <span class="score">${m.strength}</span>
+            <span class="bar" aria-hidden="true"><span style="width:${m.strength}%"></span></span>
+          </summary>
+          <div class="rank-detail">
+            ${m.assets ? `<div class="rank-meta">${esc(m.assets)}</div>` : ''}
+            ${m.note ? `<div class="rank-note">${esc(m.note)}</div>` : ''}
+            <div class="rank-ns mono">${m.basis === 'factbook' ? 'RATED FROM FACTBOOK' : 'RATED FROM RP POSTS'}${ns ? ' · ' + esc(ns) : ''}${m.file && !src ? ' · ' + esc(m.file) : ''}</div>
+            <div class="fb-list">
+              ${fbs.map((f, j) => `<span class="fb-chip">
+                <a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer">${esc(f.title || 'Factbook')}</a>${f.text ? '' : '<span class="fb-warn"> (link only)</span>'}
+                <button class="fb-x" data-fbrm="${esc(k)}|${j}" aria-label="Remove factbook ${esc(f.title || '')}">×</button>
+              </span>`).join('')}
+              <button class="fb-add" data-fbadd="${esc(m.nation)}">+ Factbook</button>
+            </div>
           </div>
-          ${m.file && !src ? `<div class="rank-ns mono">FILE: ${esc(m.file)}</div>` : ''}
-        </div>
+        </details>
       </li>`;
-    }).join('')}</ol>` : `<p class="dim orbat-sub">${src ? 'Your advisors rank the forces after the next analysis, or press Reassess.' : 'Rankings appear once an RP file has been analyzed.'}</p>`}
-    ${src ? `<div class="row wrap">
-      <button class="btn ghost small" data-act="reassess" ${busy.has('mil') ? 'disabled' : ''}>${busy.has('mil') ? '<span class="spin">Assessing</span>' : 'Reassess forces'}</button>
-      <button class="btn ghost small" data-act="track">+ Track a nation</button>
+    }).join('')}</ol>` : `<p class="empty">${src ? 'Rankings appear after the next analysis, or press Reassess.' : 'Rankings appear once a file has been analyzed.'}</p>`}
+    ${src ? `<div class="row wrap orbat-actions">
+      <button class="btn ghost small" data-act="reassess" ${busy.has('mil') ? 'disabled' : ''}>${busy.has('mil') ? '<span class="spin">Assessing</span>' : 'Reassess'}</button>
+      <button class="btn ghost small" data-act="track">+ Nation</button>
     </div>` : ''}`;
 }
 
@@ -603,35 +668,33 @@ function renderBanner() {
     $('#motto').textContent = b.motto ? '“' + b.motto + '”' : '';
     if (b.flag) { flag.src = b.flag; flag.alt = 'Flag of ' + (b.name || n); flag.hidden = false; } else flag.hidden = true;
     const pop = Number(b.population);
-    const stats = [['Category', b.category], ['Region', b.region], ['Population', pop ? (pop >= 1000 ? (pop / 1000).toFixed(2) + ' billion' : pop.toLocaleString() + ' million') : ''], ['Influence', b.influence]].filter(s => s[1]);
-    $('#statbar').innerHTML = stats.map(([k, v]) => `<span>${esc(k.toUpperCase())} <b>${esc(v)}</b></span>`).join('');
-    $('#statbar').hidden = !stats.length;
+    $('#stats').textContent = [b.category, b.region, pop ? (pop >= 1000 ? (pop / 1000).toFixed(2) + 'B' : pop.toLocaleString() + 'M') + ' people' : '', b.influence].filter(Boolean).join('  ·  ');
   } else {
     $('#pretitle').textContent = 'Office of the Head of State';
     $('#nationName').textContent = n || 'Situation Room';
-    $('#motto').textContent = '';
-    flag.hidden = true; $('#statbar').hidden = true;
+    $('#motto').textContent = ''; $('#stats').textContent = '';
+    flag.hidden = true;
   }
 }
 
 function renderFiles() {
-  const tabs = [{ id: 'overview', name: 'All files', kind: 'OVERVIEW' },
+  const tabs = [{ id: 'overview', name: 'All files', kind: 'ALL' },
     ...state.sources.map(s => ({ id: s.id, name: s.name, kind: TYPE_LABEL[s.type], pending: s.raw.filter(i => !i.analyzed).length }))];
   $('#fileList').innerHTML = tabs.map(t => `
     <button class="file-tab ${state.selected === t.id ? 'on' : ''}" data-tab="${t.id}" aria-current="${state.selected === t.id}">
-      <span>${esc(t.name)}${t.pending ? `<span class="new">${t.pending} new</span>` : ''}</span>
-      <span class="kind">${busy.has(t.id) ? '<span class="spin">reading</span>' : t.kind}</span>
+      <span class="ft-name">${esc(t.name)}${t.pending ? `<span class="new" aria-label="${t.pending} new">${t.pending}</span>` : ''}</span>
+      <span class="kind">${busy.has(t.id) ? '<span class="spin">…</span>' : t.kind}</span>
     </button>`).join('');
 }
 
 function eventHTML(e, i, showSource) {
   const src = showSource ? state.sources.find(s => s.id === e.source) : null;
   return `<div class="event">
-    <div class="no">No. ${i}</div>
+    <div class="no">${i}</div>
     <div class="body">
       <div class="title">${esc(e.title)}</div>
       <div class="detail">${esc(e.detail)}</div>
-      <div class="meta">${esc(e.actor)} · ${esc(e.tag)}${e.time ? ' · ' + esc(fmtTime(e.time)) : ''}${src ? ' · file: ' + esc(src.name) : ''}</div>
+      <div class="meta">${esc(e.actor)} · ${esc(e.tag)}${e.time ? ' · ' + esc(fmtTime(e.time)) : ''}${src ? ' · ' + esc(src.name) : ''}</div>
     </div>
   </div>`;
 }
@@ -643,35 +706,41 @@ function renderSheet() {
     const all = state.sources.flatMap(s => s.events).sort((a, b) => (a.time || 0) - (b.time || 0)).slice(-30).reverse();
     el.innerHTML = `
       <div class="sheet-head"><h2 class="typed">Situation overview</h2>
-        <div class="sheet-actions"><button class="btn red" data-act="overviewBrief" ${busy.has('overview') ? 'disabled' : ''}>${busy.has('overview') ? '<span class="spin">Convening</span>' : 'Brief me on everything'}</button></div></div>
-      ${!state.sources.length ? `<p class="empty">No case files yet. Start with Settings (your nation and Gemini key), then <b>+ Open a new file</b> for your nation, your region, and each RP thread you’re in.</p>` :
-        all.length ? all.map((e, i) => eventHTML(e, all.length - i, true)).join('') : '<p class="empty">No events logged yet. Press <b>Request new reports</b>.</p>'}`;
+        <button class="btn red" data-act="overviewBrief" ${busy.has('overview') ? 'disabled' : ''}>${busy.has('overview') ? '<span class="spin">Convening</span>' : 'Brief me'}</button></div>
+      ${!state.sources.length ? `<p class="empty">No files yet. Set your nation and Gemini key in Settings, then add a <b>+ New file</b> for your nation, your region and each RP.</p>` :
+        all.length ? all.map((e, i) => eventHTML(e, all.length - i, true)).join('') : '<p class="empty">No events yet. Press <b>Request new reports</b>.</p>'}`;
     return;
   }
   const pending = src.raw.filter(i => !i.analyzed).length;
   const isBusy = busy.has(src.id);
   const events = src.events.slice().reverse();
+  const showPaste = uiPaste === src.id || (src.type === 'paste' && !src.raw.length);
   el.innerHTML = `
     <div class="sheet-head">
-      <h2 class="typed">Re: ${esc(src.name)}</h2>
-      <span class="muted">${src.lastSync ? 'Last read ' + esc(fmtTime(src.lastSync)) : 'Not read yet'}${pending ? ' · ' + pending + ' unanalyzed' : ''}</span>
+      <div>
+        <h2 class="typed">${esc(src.name)}</h2>
+        <div class="muted">${src.lastSync ? 'Read ' + esc(fmtTime(src.lastSync)) : TYPE_LABEL[src.type] === 'INTEL' ? 'Pasted intel' : 'Not read yet'}${src.profile ? ' · ' + esc(src.profile) : ''}</div>
+      </div>
+      <div class="sheet-actions">
+        ${src.type !== 'paste' ? `<button class="btn dark" data-act="sync" ${isBusy ? 'disabled' : ''}>${isBusy ? '<span class="spin">Reading</span>' : 'Pull intel'}</button>` : ''}
+        ${pending ? `<button class="btn red" data-act="analyze" ${isBusy ? 'disabled' : ''}>Analyze ${pending}</button>` : ''}
+        <details class="more">
+          <summary class="btn ghost" aria-label="More actions">More</summary>
+          <div class="menu">
+            <button data-act="pasteToggle">Add intel by hand</button>
+            <button data-act="rename">Rename</button>
+            <button data-act="close">Close file</button>
+          </div>
+        </details>
+      </div>
     </div>
-    ${src.profile ? `<p class="profile">${esc(src.profile)}</p>` : ''}
-    <div class="sheet-actions">
-      ${src.type !== 'paste' ? `<button class="btn dark" data-act="sync" ${isBusy ? 'disabled' : ''}>${isBusy ? '<span class="spin">Reading</span>' : 'Pull new intel'}</button>` : ''}
-      ${pending ? `<button class="btn red" data-act="analyze" ${isBusy ? 'disabled' : ''}>Analyze ${pending} item${pending === 1 ? '' : 's'}</button>` : ''}
-      <button class="btn ghost" data-act="rename">Rename</button>
-      <button class="btn ghost" data-act="close">Close file</button>
-    </div>
-    <details class="paste" ${src.type === 'paste' && !src.raw.length ? 'open' : ''}>
-      <summary><b>Add intel by hand</b> (Discord messages, a dispatch, your own post)</summary>
-      <label for="pasteBox" class="muted">Paste text. Your advisors will add it to this file.</label>
+    ${showPaste ? `<div class="paste">
+      <label for="pasteBox"><b>Add intel by hand</b> <span class="muted">Discord messages, a dispatch, your own post</span></label>
       <textarea id="pasteBox" rows="5"></textarea>
-      <div class="row end"><button class="btn red" data-act="paste">File it and analyze</button></div>
-    </details>
-    ${src.summary ? `<div><b>Story so far</b><div class="summary">${esc(src.summary)}</div></div>` : ''}
-    <div><b>Event chain</b> <span class="muted">(newest first)</span></div>
-    ${events.length ? events.map((e, i) => eventHTML(e, events.length - i)).join('') : '<p class="empty">No events yet.</p>'}
+      <div class="row end">${src.type !== 'paste' ? '<button class="btn ghost" data-act="pasteToggle">Cancel</button>' : ''}<button class="btn red" data-act="paste">File it</button></div>
+    </div>` : ''}
+    ${src.summary ? `<details class="story" open><summary>Story so far</summary><div class="summary">${esc(src.summary)}</div></details>` : ''}
+    ${events.length ? `<div class="chain">${events.map((e, i) => eventHTML(e, events.length - i)).join('')}</div>` : '<p class="empty">No events yet.</p>'}
     <details class="raw"><summary>Raw intel (${src.raw.length})</summary>
       ${src.raw.slice().reverse().slice(0, 150).map(r => `<div class="raw-item"><span class="who">${esc(r.author)}</span> <span class="muted">${esc(fmtTime(r.time))}</span>\n${esc(r.text.slice(0, 2000))}</div>`).join('') || '<p class="empty">Nothing yet.</p>'}
     </details>`;
@@ -682,14 +751,14 @@ function renderCouncil() {
   const holder = src || state.overview;
   const briefs = holder.briefs || [];
   $('#briefs').innerHTML = briefs.length
-    ? briefs.map(b => `<div class="memo"><div class="from">From: ${esc(b.role)}</div><div class="text">${esc(b.brief)}</div></div>`).join('')
-    : `<p class="empty">${src ? 'Your ministers will write here after the first analysis.' : 'Press “Brief me on everything” for a cabinet briefing across all files.'}</p>`;
+    ? briefs.map(b => `<div class="memo"><div class="from">${esc(b.role)}</div><div class="text">${esc(b.brief)}</div></div>`).join('')
+    : `<p class="empty">${src ? 'Your ministers write here after the first analysis.' : 'Press “Brief me” for a briefing across all files.'}</p>`;
   $('#options').innerHTML = (holder.options || []).map((o, i) =>
-    `<button class="btn ${i === 0 ? 'red' : 'ghost'}" data-option="${esc(o)}">${esc(o)}</button>`).join('');
+    `<button class="btn ${i === 0 ? 'red' : 'ghost'} small" data-option="${esc(o)}">${esc(o)}</button>`).join('');
   $('#chat').innerHTML = (holder.chat || []).map(m => m.role === 'You'
     ? `<div class="msg-you">${esc(m.text)}</div>`
-    : `<div class="memo"><div class="from">From: ${esc(m.role)}</div><div class="text">${esc(m.text)}</div></div>`).join('')
-    + (busy.has('chat') ? '<p class="muted spin">The cabinet is deliberating</p>' : '');
+    : `<div class="memo"><div class="from">${esc(m.role)}</div><div class="text">${esc(m.text)}</div></div>`).join('')
+    + (busy.has('chat') ? '<p class="dim spin">The cabinet is deliberating</p>' : '');
 }
 
 /* ---------- settings ---------- */
@@ -765,6 +834,9 @@ function addFile() {
 
 /* ---------- events ---------- */
 document.addEventListener('click', e => {
+  const ptab = e.target.closest('[data-panel]');
+  if (ptab) { uiPanel = ptab.dataset.panel; renderPanels(); return; }
+  if (e.target.closest('.menu button')) e.target.closest('details.more')?.removeAttribute('open');
   const tab = e.target.closest('[data-tab]');
   if (tab) { state.selected = tab.dataset.tab; save(); render(); $('#file').scrollIntoView({ block: 'nearest' }); return; }
   const opt = e.target.closest('[data-option]');
@@ -802,6 +874,7 @@ document.addEventListener('click', e => {
       save(); render(); loadCensus([n.trim()]);
     }
   }
+  if (act === 'pasteToggle') { uiPaste = uiPaste === src.id ? null : src.id; renderSheet(); if (uiPaste) $('#pasteBox')?.focus(); return; }
   if (act === 'rename') { const n = prompt('New name for this file:', src.name); if (n && n.trim()) { src.name = n.trim(); save(); render(); } }
   if (act === 'close') { if (confirm(`Close “${src.name}”? Its event chain will be removed from this device.`)) { state.sources = state.sources.filter(s => s !== src); state.selected = 'overview'; save(); render(); } }
   if (act === 'paste') {
@@ -809,6 +882,7 @@ document.addEventListener('click', e => {
     if (!text) { toast('Paste something first.'); return; }
     const id = 'x' + uid();
     src.raw.push({ id, time: Date.now(), author: 'Pasted by the leader', text, analyzed: false }); src.seen.push(id);
+    uiPaste = null;
     save(); render();
     if (!state.settings.geminiKey) { toast('Filed. Add a Gemini key in Settings to analyze it.'); return; }
     busy.add(src.id); render();
@@ -831,6 +905,16 @@ $('#directiveForm').addEventListener('submit', e => {
   const v = $('#directive').value.trim();
   if (!v || busy.has('chat')) return;
   $('#directive').value = ''; sendDirective(v);
+});
+
+// Remember which nations are expanded in the Order of Battle across re-renders.
+document.addEventListener('toggle', e => {
+  const d = e.target;
+  if (d.matches?.('details[data-rank]')) d.open ? openRanks.add(d.dataset.rank) : openRanks.delete(d.dataset.rank);
+}, true);
+// Close the "More" menu when clicking elsewhere.
+document.addEventListener('click', e => {
+  document.querySelectorAll('details.more[open]').forEach(d => { if (!d.contains(e.target)) d.removeAttribute('open'); });
 });
 
 render();

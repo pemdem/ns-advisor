@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=JetBrains+Mono:wght@400;600;700&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 <header class="banner">
@@ -17,8 +17,8 @@
       <div id="pretitle" class="pretitle">Office of the Head of State</div>
       <h1 id="nationName" class="typed">Situation Room</h1>
       <div id="motto" class="motto"></div>
+      <div id="stats" class="stats mono"></div>
     </div>
-    <span class="stamp">TOP SECRET</span>
   </div>
   <div class="top-actions">
     <span id="nationLine" class="mono dim"></span>
@@ -26,30 +26,36 @@
     <button id="openSettings" class="btn ghost">Settings</button>
   </div>
 </header>
-<div id="statbar" class="statbar mono" hidden></div>
 
 <div class="layout">
   <nav class="files" aria-label="Case files">
     <h2 class="label">Case files</h2>
-    <div id="fileList"></div>
-    <button id="addFile" class="linkish">+ Open a new file</button>
-    <section id="orbat" class="orbat" aria-label="Order of battle"></section>
+    <div id="fileList" class="file-list"></div>
+    <button id="addFile" class="linkish">+ New file</button>
   </nav>
 
   <main id="file" class="sheet" aria-live="polite"></main>
 
-  <aside class="council" aria-label="Advisors">
-    <h2 class="label">Memoranda to the Leader</h2>
-    <div id="briefs"></div>
-    <div id="options" class="option-row"></div>
-    <div id="chat" class="chat"></div>
-    <form id="directiveForm" class="directive">
-      <label for="directive">Your directive</label>
-      <div class="row">
-        <input id="directive" autocomplete="off" placeholder="Write to your cabinet…">
-        <button class="btn amber" type="submit">Send</button>
-      </div>
-    </form>
+  <aside class="council" aria-label="Advisors and forces">
+    <div class="panel-tabs" role="tablist" aria-label="Side panel">
+      <button role="tab" id="tab-council" aria-controls="panel-council" data-panel="council">Council</button>
+      <button role="tab" id="tab-forces" aria-controls="panel-forces" data-panel="forces">Order of battle</button>
+    </div>
+    <div id="panel-council" role="tabpanel" aria-labelledby="tab-council" class="panel">
+      <div id="briefs"></div>
+      <div id="options" class="option-row"></div>
+      <div id="chat" class="chat"></div>
+      <form id="directiveForm" class="directive">
+        <label for="directive">Your directive</label>
+        <div class="row">
+          <input id="directive" autocomplete="off" placeholder="Write to your cabinet…">
+          <button class="btn amber" type="submit">Send</button>
+        </div>
+      </form>
+    </div>
+    <div id="panel-forces" role="tabpanel" aria-labelledby="tab-forces" class="panel" hidden>
+      <section id="orbat" class="orbat"></section>
+    </div>
   </aside>
 </div>
 
@@ -114,6 +120,6 @@
   </form>
 </dialog>
 
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>
