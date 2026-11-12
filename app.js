@@ -901,7 +901,7 @@ async function autoRefresh() {
 function render() {
   const last = Math.max(0, ...state.sources.map(s => s.lastSync || 0));
   $('#nationLine').textContent = !state.settings.nation ? 'SET YOUR NATION IN SETTINGS' : last ? 'SYNCED ' + fmtTime(last).toUpperCase() : 'NO REPORTS YET';
-  renderBanner(); renderFiles(); renderSheet(); renderPanels(); renderCouncil(); renderOrbat();
+  renderBanner(); renderWsDeck(); renderFiles(); renderSheet(); renderPanels(); renderCouncil(); renderOrbat();
 }
 
 /* Side panel tabs: Council | Order of battle */
@@ -1027,6 +1027,81 @@ function eventHTML(e, i, showSource) {
 }
 
 
+
+/* ---------- Card decks ----------
+   Small stacked decks of flags: next to your flag (your nations) and next to a dossier's name
+   (every other nation in your files). Clicking deals the next card onto the page. */
+function initials(name) { return String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase(); }
+function dossierDeck() {
+  const own = canonKey(state.settings.nation);
+  const list = [];
+  if (state.settings.nation) list.push({ sel: 'dossier', key: own, name: state.banner?.name || state.settings.nation, flag: state.banner?.flag || state.profiles?.[own]?.flag });
+  const seen = new Set([own]);
+  orbatList().list.slice().sort((a, b) => b.strength - a.strength).forEach(m => {
+    const k = canonKey(m.nation);
+    if (seen.has(k)) return; seen.add(k);
+    list.push({ sel: 'nation:' + k, key: k, name: state.profiles?.[k]?.name || m.nation, flag: state.profiles?.[k]?.flag });
+  });
+  return list;
+}
+function wsDeck() {
+  return state.workspaces.map(w => { const i = wsInfo(w); return { sel: w.id, key: w.id, name: w.name, flag: i.flag }; });
+}
+function miniDeckHTML(list, idx, kind) {
+  if (list.length < 2) return '';
+  const n = list.length, next = [];
+  for (let j = 1; j <= Math.min(3, n - 1); j++) next.push(list[(idx + j) % n]);
+  const label = kind === 'ws' ? 'your nations' : 'nations in your files';
+  return `<div class="mini-deck ${kind}" role="group" aria-label="Flip through ${label}">
+    <button class="md-arrow" data-deck="${kind}" data-step="-1" aria-label="Previous of ${label}">‹</button>
+    <div class="md-stack" style="--count:${next.length}">
+      ${next.map((c, j) => `<button class="md-card" style="--i:${j}" data-deck="${kind}" data-to="${esc(c.sel)}" aria-label="Show ${esc(c.name)}" title="${esc(c.name)}">
+        ${c.flag ? `<img src="${esc(c.flag)}" alt="">` : `<span class="md-init">${esc(initials(c.name))}</span>`}
+        ${j === 0 ? `<span class="md-name">${esc(c.name)}</span>` : ''}
+      </button>`).reverse().join('')}
+    </div>
+    <button class="md-arrow" data-deck="${kind}" data-step="1" aria-label="Next of ${label}">›</button>
+    <span class="md-count">${idx + 1}/${n}</span>
+  </div>`;
+}
+// Deal animation: the current card slides off, then the next one drops in.
+function deal(el, dir, apply) {
+  if (!el || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { apply(); return; }
+  el.classList.remove('deal-in-next', 'deal-in-prev');
+  el.classList.add('deal-out-' + dir);
+  setTimeout(() => {
+    apply();
+    el.classList.remove('deal-out-next', 'deal-out-prev');
+    void el.offsetWidth;
+    el.classList.add('deal-in-' + dir);
+    setTimeout(() => el.classList.remove('deal-in-' + dir), 460);
+  }, 210);
+}
+function deckMove(kind, step, to) {
+  if (kind === 'ws') {
+    const list = wsDeck(), i = list.findIndex(c => c.sel === state.activeWs);
+    const target = to || list[(i + step + list.length) % list.length].sel;
+    if (target === state.activeWs) return;
+    const dir = list.findIndex(c => c.sel === target) > i || step > 0 ? 'next' : 'prev';
+    setWsMenu(false);
+    deal($('#wsBtn'), dir, () => switchWs(target));
+    return;
+  }
+  const list = dossierDeck(), i = Math.max(0, list.findIndex(c => c.sel === state.selected));
+  const target = to || list[(i + step + list.length) % list.length].sel;
+  const dir = step < 0 ? 'prev' : 'next';
+  deal($('#file'), dir, () => {
+    state.selected = target;
+    const k = target === 'dossier' ? canonKey(state.settings.nation) : target.slice(7);
+    if (target !== 'dossier') { state.profiles = state.profiles || {}; state.profiles[k] = state.profiles[k] || { name: pretty(k), notes: '' }; }
+    save(); render(); $('#file').scrollTop = 0;
+  });
+}
+function renderWsDeck() {
+  const list = wsDeck();
+  $('#wsDeck').innerHTML = miniDeckHTML(list, Math.max(0, list.findIndex(c => c.sel === state.activeWs)), 'ws');
+}
+
 /* ---------- Dossier + drafter views ---------- */
 function akaHTML(k, name, onPaper) {
   const aka = akaOf(k);
@@ -1047,7 +1122,7 @@ function dossierHTML(k, ours) {
     <div class="sheet-head">
       <div class="dossier-id">
         ${flag ? `<img src="${esc(flag)}" alt="Flag of ${esc(name)}" class="dossier-flag">` : ''}
-        <div><div class="dossier-name"><h2 class="typed">${esc(name)}</h2>${akaHTML(k, name, true)}</div><div class="muted">${p?.tagline ? esc(p.tagline) : ours ? 'Your nation’s dossier' : 'Nation dossier'}</div></div>
+        <div><div class="dossier-name"><h2 class="typed">${esc(name)}</h2>${akaHTML(k, name, true)}${(() => { const d = dossierDeck(); return miniDeckHTML(d, Math.max(0, d.findIndex(c => c.sel === state.selected)), 'dossier'); })()}</div><div class="muted">${p?.tagline ? esc(p.tagline) : ours ? 'Your nation’s dossier' : 'Nation dossier'}</div></div>
       </div>
       <div class="sheet-actions">
         <button class="btn red" data-act="buildProfile" data-nation="${esc(name)}" ${building ? 'disabled' : ''}>${building ? '<span class="spin">Reading dispatches</span>' : p ? 'Rebuild dossier' : 'Build dossier'}</button>
@@ -1304,6 +1379,8 @@ function addFile() {
 
 /* ---------- events ---------- */
 document.addEventListener('click', e => {
+  const deckBtn = e.target.closest('[data-deck]');
+  if (deckBtn) { e.stopPropagation(); deckMove(deckBtn.dataset.deck, Number(deckBtn.dataset.step || 1), deckBtn.dataset.to); return; }
   const ptab = e.target.closest('[data-panel]');
   if (ptab) { uiPanel = ptab.dataset.panel; renderPanels(); return; }
   if (e.target.closest('.menu button')) e.target.closest('details.more')?.removeAttribute('open');

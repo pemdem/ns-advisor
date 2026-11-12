@@ -286,3 +286,41 @@ label.inline{font-size:13px;font-weight:700}
 .aka.paper .aka-chip{color:var(--ink);border-color:var(--line);background:var(--tab)}
 .aka.paper .aka-add{border-color:var(--dash);color:#8a1f18}
 .dossier-name{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px}
+
+/* ---------- Mini card decks (top-left: your nations; dossier header: other nations) ---------- */
+.ws{display:flex;align-items:center;gap:12px}
+.mini-deck{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.md-arrow{width:30px;height:44px;background:none;border:1px solid var(--deskline2);color:var(--amber);font-size:18px;line-height:1}
+.md-stack{position:relative;width:calc(150px + (var(--count) - 1) * 12px);height:44px}
+.md-card{position:absolute;top:0;left:calc(var(--i) * 12px);width:150px;height:44px;display:flex;align-items:center;gap:8px;padding:4px 8px 4px 4px;
+  background:var(--desk2);border:1px solid var(--deskline2);color:var(--paper);box-shadow:3px 3px 0 #000;
+  transform:translateY(calc(var(--i) * 3px)) rotate(calc(var(--i) * 2.5deg));transform-origin:20% 100%;
+  transition:transform .25s cubic-bezier(.2,.8,.2,1),border-color .2s}
+.md-card img{width:44px;height:30px;object-fit:cover;border:1px solid var(--paper);flex:0 0 auto}
+.md-init{width:44px;height:30px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;background:var(--deskline2);font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:#fff}
+.md-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:700;text-align:left}
+.md-stack:hover .md-card{transform:translateX(calc(var(--i) * 10px)) translateY(calc(var(--i) * 2px)) rotate(calc(var(--i) * 4deg))}
+.md-stack .md-card:last-child:hover{transform:translateY(-3px);border-color:var(--amber)}
+.md-count{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--dim);letter-spacing:.06em;min-width:30px}
+/* on the paper dossier */
+.mini-deck.dossier .md-arrow{border-color:var(--dash);color:var(--stamp)}
+.mini-deck.dossier .md-card{background:var(--note);border-color:var(--line);color:var(--ink);box-shadow:3px 3px 0 var(--line)}
+.mini-deck.dossier .md-card img{border-color:var(--ink)}
+.mini-deck.dossier .md-count{color:var(--muted)}
+.mini-deck.dossier{margin-left:6px}
+
+/* Deal transition: the current card slides off, the next one drops in */
+@keyframes dealOutNext{to{transform:translateX(-36px) rotate(-2.5deg);opacity:0}}
+@keyframes dealOutPrev{to{transform:translateX(36px) rotate(2.5deg);opacity:0}}
+@keyframes dealInNext{from{transform:translateX(48px) translateY(-12px) rotate(2deg) scale(.985);opacity:0}to{transform:none;opacity:1}}
+@keyframes dealInPrev{from{transform:translateX(-48px) translateY(-12px) rotate(-2deg) scale(.985);opacity:0}to{transform:none;opacity:1}}
+.deal-out-next{animation:dealOutNext .21s ease-in forwards;transform-origin:50% 100%}
+.deal-out-prev{animation:dealOutPrev .21s ease-in forwards;transform-origin:50% 100%}
+.deal-in-next{animation:dealInNext .44s cubic-bezier(.2,.8,.2,1);transform-origin:50% 100%}
+.deal-in-prev{animation:dealInPrev .44s cubic-bezier(.2,.8,.2,1);transform-origin:50% 100%}
+@media (max-width:720px){
+  .ws{flex-wrap:wrap}
+  .md-stack{width:calc(120px + (var(--count) - 1) * 10px)}
+  .md-card{width:120px}
+}
+@media (prefers-reduced-motion:reduce){.md-card,.md-stack:hover .md-card{transition:none}}
