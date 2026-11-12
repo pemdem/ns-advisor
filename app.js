@@ -334,7 +334,7 @@ Reply with JSON only: {"military":[${MILITARY_SHAPE}]}`);
 }
 
 /* Military factbooks the leader attaches to a nation (kept per nation, shared by every file) */
-const cleanBB = t => String(t || '').replace(/\[\/?[a-z*][^\]]*\]/gi, ' ').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+const cleanBB = t => String(t || '').replace(/\[img[^\]]*\][\s\S]*?\[\/img\]/gi, '').replace(/\[\/?[a-z*][^\]]*\]/gi, ' ').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 function dispatchId(url) {
   const m = /nationstates\.net/i.test(url) && String(url).match(/(?:\bid=|dispatchid=)(\d+)/);
   return m ? m[1] : null;
