@@ -161,8 +161,9 @@ legend{font-weight:700;font-size:13px;padding:0 4px}
   .banner{padding:12px 14px}
   .brand h1{font-size:21px}
   .flag{height:44px}
-  .top-actions{width:100%}
+  .top-actions{width:100%;flex-wrap:nowrap}
   .top-actions .btn.amber{flex:1}
+  #nationLine{display:none}
   .layout{grid-template-columns:minmax(0,1fr);padding:12px 14px;gap:14px}
   .files{position:static}
   .files .label{display:none}
