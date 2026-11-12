@@ -324,3 +324,6 @@ label.inline{font-size:13px;font-weight:700}
   .md-card{width:120px}
 }
 @media (prefers-reduced-motion:reduce){.md-card,.md-stack:hover .md-card{transition:none}}
+.mini-deck{padding-bottom:8px}
+.mini-deck.dossier{margin-left:0;align-self:center}
+.dossier-id{flex:1 1 380px}

@@ -1122,8 +1122,9 @@ function dossierHTML(k, ours) {
     <div class="sheet-head">
       <div class="dossier-id">
         ${flag ? `<img src="${esc(flag)}" alt="Flag of ${esc(name)}" class="dossier-flag">` : ''}
-        <div><div class="dossier-name"><h2 class="typed">${esc(name)}</h2>${akaHTML(k, name, true)}${(() => { const d = dossierDeck(); return miniDeckHTML(d, Math.max(0, d.findIndex(c => c.sel === state.selected)), 'dossier'); })()}</div><div class="muted">${p?.tagline ? esc(p.tagline) : ours ? 'Your nation’s dossier' : 'Nation dossier'}</div></div>
+        <div><div class="dossier-name"><h2 class="typed">${esc(name)}</h2>${akaHTML(k, name, true)}</div><div class="muted">${p?.tagline ? esc(p.tagline) : ours ? 'Your nation’s dossier' : 'Nation dossier'}</div></div>
       </div>
+      ${(() => { const d = dossierDeck(); return miniDeckHTML(d, Math.max(0, d.findIndex(c => c.sel === state.selected)), 'dossier'); })()}
       <div class="sheet-actions">
         <button class="btn red" data-act="buildProfile" data-nation="${esc(name)}" ${building ? 'disabled' : ''}>${building ? '<span class="spin">Reading dispatches</span>' : p ? 'Rebuild dossier' : 'Build dossier'}</button>
       </div>
