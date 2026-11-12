@@ -78,7 +78,7 @@ function switchWs(id) {
   unpack(to.data || {});
   to.data = null;
   state.activeWs = id;
-  uiPaste = null; openRanks.clear();
+  uiPaste = null; uiDraft = null; uiStance = ''; openRanks.clear();
   save(); render(); loadBanner(false);
 }
 function createWs(name, nation) {
@@ -334,8 +334,9 @@ Treat RP posts as real in-world events. Never invent events, numbers or claims t
 Council members:
 ${s.advisors.map(a => `- ${a.role}: ${a.persona}`).join('\n')}
 
-What the leader wants you to always know about the nation:
-${s.lore.trim() || '(nothing given)'}`;
+What the leader wants you to always know about the nation (notes, lore, past chats):
+${s.lore.trim().slice(0, 12000) || '(nothing given)'}
+${profileText(s.nation, 'OUR NATION\u2019S DOSSIER (match its culture, institutions and tone in all advice)')}`;
 }
 const eventLine = e => `- ${e.title} (${e.tag}; ${e.actor}): ${e.detail}`;
 
@@ -522,6 +523,104 @@ function factbookBlock(nations) {
   return parts.length ? `MILITARY FACTBOOKS the nations published about themselves. These are their own claims: use them for force sizes, equipment and doctrine, but they may be exaggerated or out of date, and what actually happens in the RP overrides them.\n${parts.join('\n\n')}\n` : '';
 }
 
+
+/* ---------- Nation dossiers ----------
+   Built by Gemini from a nation's own dispatches, attached factbooks and the leader's pasted notes.
+   Kept per nation (shared by every workspace) in state.profiles[slug]. */
+const PROFILE_SECTIONS = ['Government & politics', 'Culture & society', 'Economy', 'Military & doctrine', 'Foreign policy', 'RP style'];
+const CAT_ORDER = { factbook: 0, account: 1, meta: 2, bulletin: 3 };
+function profileText(nation, label, compact) {
+  const p = state.profiles?.[slug(nation)]?.profile;
+  if (!p) return '';
+  const secs = (p.sections || []).filter(x => !compact || /military|foreign|rp style/i.test(x.title));
+  return `${label}:
+${p.tagline || ''}
+${secs.map(x => `${x.title}: ${(x.points || []).join('; ')}`).join('\n')}
+${compact ? '' : `Key figures: ${(p.figures || []).map(f => f.name + ' (' + f.role + ')').join(', ') || 'none listed'}
+Allies: ${(p.allies || []).join(', ') || 'none listed'} | Rivals: ${(p.rivals || []).join(', ') || 'none listed'}`}
+Voice in RP posts: ${p.voice || 'unknown'}
+`;
+}
+async function buildProfile(nation, isOurs) {
+  state.profiles = state.profiles || {};
+  const k = slug(nation), old = state.profiles[k] || {};
+  const rec = { ...old, name: nation, notes: old.notes || '' };
+  let docs = [], budget = 90000;
+  // 1. The nation's own dispatches, factbooks first.
+  try {
+    const x = await nsApi({ nation: k, q: 'name fullname type flag motto category region dispatchlist' });
+    if (x.querySelector('NATION')) {
+      Object.assign(rec, { name: xt(x, 'NAME') || nation, fullname: xt(x, 'FULLNAME'), flag: xt(x, 'FLAG'), motto: xt(x, 'MOTTO'), category: xt(x, 'CATEGORY'), region: xt(x, 'REGION'), ns: true });
+      const list = [...x.querySelectorAll('DISPATCHLIST > DISPATCH')].map(d => ({ id: d.getAttribute('id'), title: xt(d, 'TITLE'), cat: xt(d, 'CATEGORY'), sub: xt(d, 'SUBCATEGORY') }))
+        .sort((a, b) => (CAT_ORDER[a.cat.toLowerCase()] ?? 9) - (CAT_ORDER[b.cat.toLowerCase()] ?? 9)).slice(0, 12);
+      for (let i = 0; i < list.length && budget > 0; i++) {
+        toast(`Reading ${rec.name}’s dispatches (${i + 1} of ${list.length})…`, 20000);
+        try {
+          const dx = await nsApi({ q: 'dispatch', dispatchid: list[i].id });
+          const text = cleanBB(cleanNS(xt(dx, 'TEXT'))).slice(0, Math.min(9000, budget));
+          if (text) { docs.push({ ...list[i], text, url: 'https://www.nationstates.net/page=dispatch/id=' + list[i].id }); budget -= text.length; }
+        } catch (e) { /* skip unreadable dispatch */ }
+      }
+    }
+  } catch (e) { rec.ns = false; /* not a NationStates nation: build from factbooks and notes */ }
+  // 2. Factbooks attached by the leader (non-NS links with pasted text).
+  for (const f of state.factbooks?.[k] || []) {
+    if (f.text && !docs.some(d => d.id && d.id === f.dispatch)) docs.push({ title: f.title || 'Factbook', cat: 'Factbook', text: f.text.slice(0, 9000), url: f.url });
+  }
+  const notes = (isOurs ? state.settings.lore : rec.notes || '').trim();
+  if (!docs.length && !notes) throw new Error(`No dispatches, factbooks or notes found for ${nation}. Paste some notes first.`);
+  toast(`Writing ${rec.name}’s dossier…`, 30000);
+  const out = await gemini(`You are an analyst building a dossier on the NationStates nation "${rec.name}"${rec.fullname ? ' (' + rec.fullname + ')' : ''} for a roleplay advisory app.
+Use ONLY the material below: the nation's own published dispatches and factbooks, and notes from its player. Do not invent facts. If a section has no information, give one point saying it is unknown.
+Write short bullet points, never paragraphs. Each point at most 15 words.
+
+${notes ? `NOTES FROM THE PLAYER (may include text pasted from earlier chats):\n${notes.slice(0, 15000)}\n` : ''}
+${docs.map(d => `--- ${d.cat}${d.sub ? ' › ' + d.sub : ''}: “${d.title}” ---\n${d.text}`).join('\n\n')}
+
+Reply with JSON only:
+{"tagline":"who this nation is, at most 15 words",
+"sections":[${PROFILE_SECTIONS.map(t => `{"title":"${t}","points":["2 to 4 points"]}`).join(',')}],
+"figures":[{"name":"person","role":"their role"}],
+"allies":["nation names"],"rivals":["nation names"],
+"voice":"how this nation writes its RP posts: tone, register, formatting habits, recurring phrases; at most 40 words"}
+"RP style" means how the player writes and roleplays this nation: post length, formality, in-character conventions, use of news reports or press releases, and so on.`);
+  const list = (x, n) => (Array.isArray(x) ? x : []).map(String).filter(Boolean).slice(0, n);
+  rec.profile = {
+    tagline: String(out.tagline || ''),
+    sections: (Array.isArray(out.sections) ? out.sections : []).map(x => ({ title: String(x.title || ''), points: list(x.points, 5) })).filter(x => x.title),
+    figures: (Array.isArray(out.figures) ? out.figures : []).map(f => ({ name: String(f.name || ''), role: String(f.role || '') })).filter(f => f.name).slice(0, 8),
+    allies: list(out.allies, 10), rivals: list(out.rivals, 10), voice: String(out.voice || '')
+  };
+  rec.sources = docs.map(d => ({ title: d.title, cat: d.cat, url: d.url }));
+  rec.usedNotes = !!notes;
+  rec.at = Date.now();
+  state.profiles[k] = rec;
+  save();
+}
+
+/* ---------- Reply drafter ---------- */
+async function draftReply(src, stance, opts) {
+  const recent = src.raw.slice(-12).map(i => `${i.author}: ${i.text.slice(0, 2500)}`).join('\n\n');
+  const out = await gemini(`${councilBlock()}
+
+${sourceContext(src, { noFactbooks: true })}
+
+The most recent posts in this RP, oldest first:
+${recent || '(none)'}
+
+TASK: Write ${state.settings.nation || 'our nation'}'s next in-character (IC) post for this RP.
+The leader's decision: "${stance}"
+Rules:
+- Write as the government/people of ${state.settings.nation || 'our nation'}, matching its voice and culture from the dossier and notes${state.profiles?.[slug(state.settings.nation)]?.profile?.voice ? ' (voice: ' + state.profiles[slug(state.settings.nation)].profile.voice + ')' : ''}.
+- Respond to what the other nations actually posted. Use real names, numbers and places from the material.
+- Never control other players' nations or decide outcomes for them (no godmodding). Only describe our own actions, statements and forces.
+- Stay consistent with our factbooks and earlier posts. Do not invent major new assets.
+- Length: ${opts.length === 'short' ? 'about 120 words' : opts.length === 'long' ? 'about 500 words' : 'about 250 words'}.
+- Format: ${opts.bbcode ? 'NationStates forum BBCode ([b], [i], [u], [quote], [hr], [box] if suitable). No markdown.' : 'plain text, no markdown and no BBCode.'}
+Reply with JSON only: {"post":"the full post text","note":"one short OOC note to the leader about choices you made, at most 20 words"}`);
+  return { post: String(out.post || ''), note: String(out.note || ''), stance, at: Date.now(), ...opts };
+}
+
 /* Official NationStates "Defense Forces" census (scale 46), cached 12 h per nation */
 async function loadCensus(names) {
   state.census = state.census || {};
@@ -561,7 +660,8 @@ ${src.events.slice(-15).map(eventLine).join('\n') || '(none)'}
 Your latest briefs: ${(src.briefs || []).map(b => b.role + ': ' + b.brief).join(' | ') || '(none)'}
 Military standings:
 ${militaryLines(src)}
-${opts.noFactbooks ? '' : factbookBlock((src.military || []).map(m => m.nation))}`;
+${opts.noFactbooks ? '' : factbookBlock((src.military || []).map(m => m.nation))}
+${(src.military || []).filter(m => slug(m.nation) !== slug(state.settings.nation)).map(m => profileText(m.nation, 'DOSSIER: ' + m.nation, true)).filter(Boolean).join('\n')}`;
   return Object.assign(new String(c), { chat: src.chat });
 }
 function overviewContext() {
@@ -717,6 +817,7 @@ function renderOrbat() {
                 <button class="fb-x" data-fbrm="${esc(k)}|${j}" aria-label="Remove factbook ${esc(f.title || '')}">×</button>
               </span>`).join('')}
               <button class="fb-add" data-fbadd="${esc(m.nation)}">+ Factbook</button>
+              <button class="fb-add" data-profile="${esc(m.nation)}">Dossier</button>
             </div>
           </div>
         </details>
@@ -763,7 +864,7 @@ function renderBanner() {
 }
 
 function renderFiles() {
-  const tabs = [{ id: 'overview', name: 'All files', kind: 'ALL' },
+  const tabs = [{ id: 'dossier', name: 'Our nation', kind: 'DOSSIER' }, { id: 'overview', name: 'All files', kind: 'ALL' },
     ...state.sources.map(s => ({ id: s.id, name: s.name, kind: TYPE_LABEL[s.type], pending: s.raw.filter(i => !i.analyzed).length }))];
   $('#fileList').innerHTML = tabs.map(t => `
     <button class="file-tab ${state.selected === t.id ? 'on' : ''}" data-tab="${t.id}" aria-current="${state.selected === t.id}">
@@ -778,6 +879,78 @@ function eventHTML(e, i, showSource) {
     <summary><span class="no">${i}</span><span class="title">${esc(e.title)}</span><span class="tag tag-${esc(String(e.tag).toLowerCase())}">${esc(e.tag)}</span></summary>
     <div class="event-more">${esc(e.detail)}<div class="meta">${esc(e.actor)}${e.time ? ' · ' + esc(fmtTime(e.time)) : ''}${src ? ' · ' + esc(src.name) : ''}</div></div>
   </details>`;
+}
+
+
+/* ---------- Dossier + drafter views ---------- */
+let uiDraft = null, uiStance = '';
+function dossierHTML(k, ours) {
+  const rec = state.profiles?.[k] || {};
+  const p = rec.profile;
+  const name = ours ? (state.banner?.name || state.settings.nation || 'Your nation') : (rec.name || pretty(k));
+  const flag = ours ? state.banner?.flag : rec.flag;
+  const notes = ours ? state.settings.lore : (rec.notes || '');
+  const building = busy.has('profile:' + k);
+  if (ours && !state.settings.nation) return `<div class="sheet-head"><h2 class="typed">Our nation</h2></div><p class="empty">Set your nation in Settings first.</p>`;
+  const chips = (label, items, cls) => items?.length ? `<div class="chip-row"><span class="chip-label">${label}</span>${items.map(x => `<span class="chip ${cls || ''}">${esc(x)}</span>`).join('')}</div>` : '';
+  return `
+    <div class="sheet-head">
+      <div class="dossier-id">
+        ${flag ? `<img src="${esc(flag)}" alt="Flag of ${esc(name)}" class="dossier-flag">` : ''}
+        <div><h2 class="typed">${esc(name)}</h2><div class="muted">${p?.tagline ? esc(p.tagline) : ours ? 'Your nation’s dossier' : 'Nation dossier'}</div></div>
+      </div>
+      <div class="sheet-actions">
+        <button class="btn red" data-act="buildProfile" data-nation="${esc(name)}" ${building ? 'disabled' : ''}>${building ? '<span class="spin">Reading dispatches</span>' : p ? 'Rebuild dossier' : 'Build dossier'}</button>
+      </div>
+    </div>
+    ${p ? `
+      <div class="dossier-grid">
+        ${p.sections.map(x => `<section class="dcard ${/rp style/i.test(x.title) ? 'rp' : ''}"><h3>${esc(x.title)}</h3><ul>${x.points.map(pt => `<li>${esc(pt)}</li>`).join('')}</ul></section>`).join('')}
+      </div>
+      ${p.voice ? `<div class="voice-card"><span class="chip-label">RP voice</span><p>${esc(p.voice)}</p></div>` : ''}
+      ${chips('Key figures', p.figures.map(f => f.name + (f.role ? ' — ' + f.role : '')))}
+      ${chips('Allies', p.allies, 'ally')}
+      ${chips('Rivals', p.rivals, 'rival')}
+      <details class="sources"><summary>Built from ${rec.sources?.length || 0} dispatch${rec.sources?.length === 1 ? '' : 'es'}/factbook${rec.sources?.length === 1 ? '' : 's'}${rec.usedNotes ? ' + your notes' : ''} · ${esc(fmtTime(rec.at))}</summary>
+        <ul>${(rec.sources || []).map(d => `<li>${d.url ? `<a href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">${esc(d.title)}</a>` : esc(d.title)} <span class="muted">${esc(d.cat || '')}</span></li>`).join('') || '<li>Your notes only</li>'}</ul>
+      </details>` : `<p class="empty">No dossier yet. <b>Build dossier</b> reads ${esc(name)}’s dispatches and factbooks${notes ? ' and the notes below' : ''}, and turns them into a short profile your advisors use.</p>`}
+    <section class="notes">
+      <label for="notesBox"><b>Notes &amp; lore</b> <span class="muted">Paste anything: past chats, constitution, doctrine, history. ${ours ? 'Your advisors always read this.' : ''}</span></label>
+      <textarea id="notesBox" rows="7" data-nation="${esc(k)}" data-ours="${ours}">${esc(notes)}</textarea>
+      <div class="row end wrap">
+        <span class="muted" id="notesCount">${notes.length.toLocaleString()} characters</span>
+        <button class="btn ghost" data-act="saveNotes">Save notes</button>
+        <button class="btn dark" data-act="saveNotesBuild" data-nation="${esc(name)}" ${building ? 'disabled' : ''}>Save &amp; rebuild</button>
+      </div>
+    </section>`;
+}
+
+function drafterHTML(src) {
+  const d = src.draft;
+  const busyD = busy.has('draft:' + src.id);
+  return `<section class="drafter" aria-label="Draft my reply">
+    <div class="drafter-head"><h3 class="label ink">Draft my reply</h3><button class="btn ghost small" data-act="draftToggle">Close</button></div>
+    <label for="stance">What do you want to do?</label>
+    ${(src.options || []).length ? `<div class="option-row">${src.options.map(o => `<button class="chip-btn" data-stance="${esc(o)}">${esc(o)}</button>`).join('')}</div>` : ''}
+    <textarea id="stance" rows="2" placeholder="e.g. Reject the ultimatum, but offer talks under regional mediation">${esc(uiStance)}</textarea>
+    <div class="row wrap">
+      <label class="inline" for="draftLen">Length</label>
+      <select id="draftLen" class="small-select">
+        <option value="short" ${d?.length === 'short' ? 'selected' : ''}>Short</option>
+        <option value="medium" ${!d || d.length === 'medium' ? 'selected' : ''}>Medium</option>
+        <option value="long" ${d?.length === 'long' ? 'selected' : ''}>Long</option>
+      </select>
+      <label class="check"><input type="checkbox" id="draftBB" ${d?.bbcode === false ? '' : 'checked'}> Forum formatting (BBCode)</label>
+      <button class="btn red" data-act="draft" ${busyD ? 'disabled' : ''}>${busyD ? '<span class="spin">Writing</span>' : d ? 'Rewrite' : 'Write draft'}</button>
+    </div>
+    ${d?.post ? `
+      <label for="draftOut">Draft <span class="muted">· edit freely, then copy</span></label>
+      <textarea id="draftOut" rows="12" class="draft-out">${esc(d.post)}</textarea>
+      <div class="row wrap">
+        ${d.note ? `<span class="muted draft-note">${esc(d.note)}</span>` : ''}
+        <button class="btn dark" data-act="copyDraft">Copy post</button>
+      </div>` : ''}
+  </section>`;
 }
 
 const THREAT_LABEL = { low: 'Low', elevated: 'Elevated', high: 'High', critical: 'Critical' };
@@ -804,6 +977,8 @@ function renderSheet() {
   const el = $('#file');
   const src = current();
   const hasKey = !!state.settings.geminiKey;
+  if (state.selected === 'dossier') { el.innerHTML = dossierHTML(slug(state.settings.nation), true); return; }
+  if (String(state.selected).startsWith('nation:')) { el.innerHTML = dossierHTML(state.selected.slice(7), false); return; }
   if (!src) {
     const all = state.sources.flatMap(s => s.events).sort((a, b) => (a.time || 0) - (b.time || 0)).slice(-40).reverse();
     el.innerHTML = `
@@ -827,6 +1002,7 @@ function renderSheet() {
       <div class="sheet-actions">
         ${src.type !== 'paste' ? `<button class="btn dark" data-act="sync" ${isBusy ? 'disabled' : ''}>${isBusy ? '<span class="spin">Reading</span>' : 'Pull intel'}</button>` : ''}
         ${pending ? `<button class="btn red" data-act="analyze" ${isBusy ? 'disabled' : ''}>Analyze ${pending}</button>` : ''}
+        <button class="btn ${uiDraft === src.id ? 'dark' : 'ghost'}" data-act="draftToggle" aria-expanded="${uiDraft === src.id}">Draft reply</button>
         <details class="more">
           <summary class="btn ghost" aria-label="More actions">More</summary>
           <div class="menu">
@@ -842,6 +1018,7 @@ function renderSheet() {
       <textarea id="pasteBox" rows="4"></textarea>
       <div class="row end">${src.type !== 'paste' ? '<button class="btn ghost" data-act="pasteToggle">Cancel</button>' : ''}<button class="btn red" data-act="paste">File it</button></div>
     </div>` : ''}
+    ${uiDraft === src.id ? drafterHTML(src) : ''}
     ${assessmentHTML(src.assessment, busy.has('assess:' + src.id), hasKey && (src.summary || src.events.length))}
     <h3 class="label ink">Event chain <span class="muted">· tap to expand</span></h3>
     ${events.length ? `<div class="chain">${events.map((e, i) => eventHTML(e, events.length - i)).join('')}</div>` : `<p class="empty">${pending ? 'Press Analyze to build the event chain.' : 'No events yet.'}</p>`}
@@ -950,6 +1127,16 @@ document.addEventListener('click', e => {
   if (tab) { state.selected = tab.dataset.tab; save(); render(); $('#file').scrollIntoView({ block: 'nearest' }); return; }
   const opt = e.target.closest('[data-option]');
   if (opt) { if (!busy.has('chat')) sendDirective('I’m considering: ' + opt.dataset.option + '. Advise me.'); return; }
+  const prof = e.target.closest('[data-profile]');
+  if (prof) {
+    const k = slug(prof.dataset.profile);
+    state.profiles = state.profiles || {};
+    state.profiles[k] = state.profiles[k] || { name: prof.dataset.profile, notes: '' };
+    state.selected = k === slug(state.settings.nation) ? 'dossier' : 'nation:' + k;
+    save(); render(); $('#file').scrollTop = 0; return;
+  }
+  const stanceBtn = e.target.closest('[data-stance]');
+  if (stanceBtn) { uiStance = stanceBtn.dataset.stance; const t = $('#stance'); if (t) { t.value = uiStance; t.focus(); } return; }
   const fbAdd = e.target.closest('[data-fbadd]');
   if (fbAdd) { addFactbook(fbAdd.dataset.fbadd); return; }
   const fbRm = e.target.closest('[data-fbrm]');
@@ -974,7 +1161,46 @@ document.addEventListener('click', e => {
     return;
   }
   if (act === 'overviewBrief') overviewBrief();
+  if (act === 'saveNotes' || act === 'saveNotesBuild') {
+    const box = $('#notesBox');
+    if (box) {
+      if (box.dataset.ours === 'true') state.settings.lore = box.value;
+      else { state.profiles = state.profiles || {}; const k = box.dataset.nation; state.profiles[k] = { ...(state.profiles[k] || { name: pretty(k) }), notes: box.value }; }
+      save(); if (act === 'saveNotes') toast('Notes saved.');
+    }
+    if (act === 'saveNotes') return;
+  }
+  if (act === 'buildProfile' || act === 'saveNotesBuild') {
+    const name = e.target.closest('[data-act]').dataset.nation;
+    if (!state.settings.geminiKey) { toast('Add your Gemini key in Settings first.'); return; }
+    const k = slug(name), ours = state.selected === 'dossier';
+    if (busy.has('profile:' + k)) return;
+    busy.add('profile:' + k); renderSheet();
+    buildProfile(name, ours).then(() => toast(`${name}’s dossier is ready.`)).catch(err => toast(err.message, 9000))
+      .finally(() => { busy.delete('profile:' + k); render(); });
+    return;
+  }
   if (!src) return;
+  if (act === 'draftToggle') { uiDraft = uiDraft === src.id ? null : src.id; renderSheet(); if (uiDraft) $('#stance')?.focus(); return; }
+  if (act === 'draft') {
+    const stance = ($('#stance')?.value || '').trim();
+    if (!stance) { toast('Say what you want to do first, or tap one of the options.'); return; }
+    if (!state.settings.geminiKey) { toast('Add your Gemini key in Settings first.'); return; }
+    uiStance = stance;
+    const opts = { length: $('#draftLen').value, bbcode: $('#draftBB').checked };
+    const key = 'draft:' + src.id;
+    busy.add(key); renderSheet();
+    draftReply(src, stance, opts).then(d => { src.draft = d; save(); }).catch(err => toast(err.message, 9000))
+      .finally(() => { busy.delete(key); renderSheet(); });
+    return;
+  }
+  if (act === 'copyDraft') {
+    const t = $('#draftOut'); if (!t) return;
+    if (src.draft) { src.draft.post = t.value; save(); }
+    (navigator.clipboard?.writeText(t.value) || Promise.reject()).then(() => toast('Post copied. Paste it into the thread.'))
+      .catch(() => { t.select(); document.execCommand('copy'); toast('Post copied.'); });
+    return;
+  }
   if (act === 'sync') syncAndAnalyze(src);
   if (act === 'analyze') { busy.add(src.id); render(); analyze(src).catch(err => toast(err.message, 8000)).finally(() => { busy.delete(src.id); render(); }); }
   if (act === 'reassess') {
@@ -1050,6 +1276,12 @@ $('#wsForm').addEventListener('submit', e => {
   if (!name && !nation) { e.preventDefault(); toast('Give it a name or a nation.'); return; }
   createWs(name, nation);
   toast(`Switched to ${name || nation}.`);
+});
+
+document.addEventListener('input', e => {
+  if (e.target.id === 'stance') uiStance = e.target.value;
+  if (e.target.id === 'notesBox') { const c = $('#notesCount'); if (c) c.textContent = e.target.value.length.toLocaleString() + ' characters (unsaved)'; }
+  if (e.target.id === 'draftOut') { const src = current(); if (src?.draft) src.draft.post = e.target.value; }
 });
 
 // Remember which nations are expanded in the Order of Battle across re-renders.
