@@ -10,6 +10,7 @@ const DEFAULT_ADVISORS = [
   { role: 'Intelligence Chief', persona: 'Skeptical analyst. Separates confirmed facts from claims, flags deception and unknowns.' },
   { role: 'Minister of the Economy', persona: 'Pragmatic economist. Budgets, trade, sanctions, domestic stability.' }
 ];
+const DEFAULT_PROXY = 'https://ns-forum-proxy.demariepeter7.workers.dev/?url=';
 const TYPE_LABEL = { nation: 'NATION', region: 'REGION', thread: 'RP', paste: 'INTEL' };
 const MAX_RAW = 400, MAX_SEEN = 3000, MAX_EVENTS = 300, CHUNK_CHARS = 120000;
 
@@ -19,7 +20,7 @@ const busy = new Set();
 
 function fresh() {
   return {
-    settings: { nation: '', geminiKey: '', model: '', proxy: '', lore: '', advisors: DEFAULT_ADVISORS.map(a => ({ ...a })) },
+    settings: { nation: '', geminiKey: '', model: '', proxy: DEFAULT_PROXY, lore: '', advisors: DEFAULT_ADVISORS.map(a => ({ ...a })) },
     sources: [],
     overview: { briefs: [], options: [], chat: [] },
     selected: 'overview',
@@ -46,6 +47,7 @@ function migrateWs(st) {
     st.activeWs = id;
   }
   if (!st.workspaces.some(w => w.id === st.activeWs)) st.activeWs = st.workspaces[0].id;
+  if (!st.settings.proxy) st.settings.proxy = DEFAULT_PROXY;
   return st;
 }
 function save() {
@@ -77,6 +79,7 @@ function switchWs(id) {
   from.data = packActive();
   unpack(to.data || {});
   to.data = null;
+  normalizeAllMilitary();
   state.activeWs = id;
   uiPaste = null; uiDraft = null; uiStance = ''; openRanks.clear();
   save(); render(); loadBanner(false);
@@ -344,7 +347,7 @@ ${s.advisors.map(a => `- ${a.role}: ${a.persona}`).join('\n')}
 
 What the leader wants you to always know about the nation (notes, lore, past chats):
 ${s.lore.trim().slice(0, 12000) || '(nothing given)'}
-${profileText(s.nation, 'OUR NATION\u2019S DOSSIER (match its culture, institutions and tone in all advice)')}`;
+${profileText(s.nation, 'OUR NATION\u2019S DOSSIER (match its culture, institutions and tone in all advice)')}${nameMapText()}`;
 }
 const eventLine = e => `- ${e.title} (${e.tag}; ${e.actor}): ${e.detail}`;
 
@@ -407,7 +410,7 @@ Rate every other nation only from what the RP, the summary and the context say: 
 /* Ratings for nations with a factbook come only from the factbook. */
 function fbSig(k) { return (state.factbooks?.[k] || []).filter(f => f.text).map(f => f.url + ':' + f.text.length).join('|'); }
 function fbScore(nation) {
-  const k = slug(nation), s = state.fbScores?.[k];
+  const k = canonKey(nation), s = state.fbScores?.[k];
   return s && s.sig && s.sig === fbSig(k) ? s : null;
 }
 function withFactbookScores(list) {
@@ -424,14 +427,14 @@ async function scoreFactbooks(nations, force) {
   // Factbooks removed or emptied: drop their rating so the RP rating takes over again.
   Object.keys(state.fbScores).forEach(k => { if (!fbSig(k)) delete state.fbScores[k]; });
   if (!todo.length || !state.settings.geminiKey) { save(); return; }
-  const names = todo.map(k => nations.find(n => slug(n) === k) || pretty(k));
+  const names = todo.map(k => nations.find(n => canonKey(n) === k) || pretty(k));
   const out = await gemini(`You are a military analyst for a NationStates roleplay. Rate each nation's military strength using ONLY its published factbook below, as the nation describes itself. Ignore anything else you know.
 ${STRENGTH_SCALE}
 
 ${factbookBlock(names)}
 Reply with JSON only: {"forces":[{"nation":"name exactly as given above","strength":0-100,"assets":"key forces in under 12 words","note":"one short sentence on what the rating rests on"}]}`);
   for (const f of Array.isArray(out.forces) ? out.forces : []) {
-    const k = slug(f.nation);
+    const k = canonKey(f.nation);
     if (!todo.includes(k)) continue;
     const strength = Math.max(0, Math.min(100, Math.round(Number(f.strength))));
     if (Number.isNaN(strength)) continue;
@@ -446,12 +449,13 @@ function militaryLines(src) {
   return m.length ? m.map(x => `- ${x.nation}${x.basis === 'factbook' ? ' [FACTBOOK]' : ''}: ${x.strength ?? '?'} (${x.assets || 'unknown'}; trend ${x.trend || 'steady'})`).join('\n') : '(none assessed yet)';
 }
 function militaryRules() { return MILITARY_RULES.replace('${us}', state.settings.nation || 'our nation'); }
+function cleanName(n) { return String(n || '').replace(/\s*\[[^\]]*\]\s*/g, ' ').replace(/\s+/g, ' ').trim(); }
 function cleanMilitary(list) {
   const seen = new Set();
   return (Array.isArray(list) ? list : []).map(x => ({
-    nation: String(x.nation || '').trim(), strength: Math.max(0, Math.min(100, Math.round(Number(x.strength)))),
+    nation: canonName(cleanName(x.nation)), strength: Math.max(0, Math.min(100, Math.round(Number(x.strength)))),
     assets: String(x.assets || ''), trend: ['up', 'down', 'steady'].includes(x.trend) ? x.trend : 'steady', note: String(x.note || '')
-  })).filter(x => x.nation && !Number.isNaN(x.strength) && !seen.has(slug(x.nation)) && seen.add(slug(x.nation)));
+  })).filter(x => x.nation && !Number.isNaN(x.strength) && !seen.has(canonKey(x.nation)) && seen.add(canonKey(x.nation)));
 }
 
 async function reassessMilitary(src) {
@@ -493,7 +497,7 @@ async function addFactbook(nation) {
   try { url = new URL(raw.trim()); if (!/^https?:$/.test(url.protocol)) throw 0; }
   catch (e) { toast('That doesn’t look like a link.'); return; }
   state.factbooks = state.factbooks || {};
-  const list = state.factbooks[slug(nation)] = state.factbooks[slug(nation)] || [];
+  const list = state.factbooks[canonKey(nation)] = state.factbooks[canonKey(nation)] || [];
   if (list.some(f => f.url === url.href)) { toast('That factbook is already attached.'); return; }
   const fb = { url: url.href, title: '', text: '', at: Date.now(), dispatch: dispatchId(url.href) };
   if (fb.dispatch) {
@@ -513,7 +517,7 @@ async function addFactbook(nation) {
   finally { busy.delete('mil'); renderOrbat(); }
 }
 async function refreshFactbooks(nations) {
-  for (const n of nations) for (const fb of state.factbooks?.[slug(n)] || []) {
+  for (const n of nations) for (const fb of state.factbooks?.[canonKey(n)] || []) {
     if (fb.dispatch && Date.now() - (fb.at || 0) > 24 * 3600e3) { try { await fetchDispatch(fb); } catch (e) { /* keep the old copy */ } }
   }
   save();
@@ -522,7 +526,7 @@ async function refreshFactbooks(nations) {
 function factbookBlock(nations) {
   let budget = 40000;
   const parts = [];
-  for (const n of nations) for (const fb of state.factbooks?.[slug(n)] || []) {
+  for (const n of nations) for (const fb of state.factbooks?.[canonKey(n)] || []) {
     const body = fb.text ? fb.text.slice(0, Math.min(10000, budget)) : `(link only, not readable: ${fb.url})`;
     budget -= body.length;
     parts.push(`--- ${n}: “${fb.title || 'Factbook'}”${fb.kind ? ' (' + fb.kind + ')' : ''} ---\n${body}`);
@@ -532,13 +536,102 @@ function factbookBlock(nations) {
 }
 
 
+
+/* ---------- Nation names: RP names vs NationStates names ----------
+   Many players RP under a different name than their NationStates nation (Abenti = Germania).
+   Names map to one canonical NationStates nation through:
+   1. "Also known as" names found in the nation's own dispatches when its dossier is built,
+   2. names you add yourself, and 3. an AI double-check of names NationStates doesn't know.
+   state.aliases[slug(alias)] = { to: canonicalSlug, by: 'you' | 'ai' }; state.aliasBlock[slug] = true unlinks a name. */
+function canonKey(name) {
+  const k = slug(cleanName(name));
+  if (!k) return k;
+  const a = state.aliases?.[k];
+  if (a && !state.aliasBlock?.[k]) return a.to;
+  if (state.profiles?.[k]?.profile) return k;
+  if (!state.aliasBlock?.[k]) {
+    for (const [pk, rec] of Object.entries(state.profiles || {})) {
+      if ((rec.profile?.aka || []).some(x => slug(x) === k)) return pk;
+    }
+  }
+  return k;
+}
+function canonName(name) {
+  const k = canonKey(name);
+  return state.profiles?.[k]?.name || (k === slug(cleanName(name)) ? cleanName(name) : pretty(k));
+}
+function akaOf(k) {
+  const fromDossier = (state.profiles?.[k]?.profile?.aka || []).filter(a => !state.aliasBlock?.[slug(a)] && slug(a) !== k);
+  const manual = Object.entries(state.aliases || {}).filter(([a, v]) => v.to === k && !state.aliasBlock?.[a]).map(([a, v]) => v.label || pretty(a));
+  const seen = new Set(); return [...fromDossier, ...manual].filter(a => !seen.has(slug(a)) && seen.add(slug(a)));
+}
+function nameMapText() {
+  const lines = Object.keys(state.profiles || {}).map(k => { const a = akaOf(k); return a.length ? `${a.join(', ')} = ${state.profiles[k].name}` : ''; }).filter(Boolean);
+  return lines.length ? `\nKnown alternate names (always use the NationStates name on the right, and treat them as the same nation):\n${lines.join('\n')}` : '';
+}
+function addAlias(alias, toName, by) {
+  const a = slug(cleanName(alias)), to = canonKey(toName);
+  if (!a || !to || a === to) return;
+  state.aliases = state.aliases || {}; state.aliasBlock = state.aliasBlock || {};
+  state.aliases[a] = { to, by: by || 'you', label: cleanName(alias), at: Date.now() };
+  delete state.aliasBlock[a];
+  normalizeAllMilitary(); save();
+}
+function removeAlias(alias) {
+  const a = slug(alias);
+  state.aliasBlock = state.aliasBlock || {};
+  if (state.aliases?.[a]) delete state.aliases[a];
+  state.aliasBlock[a] = true;
+  save();
+}
+// Re-key every file's rankings to canonical names and merge duplicates (keeps the higher-information entry).
+function normalizeAllMilitary() {
+  for (const src of state.sources) {
+    if (!src.military?.length) continue;
+    const merged = new Map();
+    for (const m of src.military) {
+      const n = { ...m, nation: canonName(cleanName(m.nation)) }, k = canonKey(n.nation), prev = merged.get(k);
+      if (!prev || (n.assets || '').length > (prev.assets || '').length) merged.set(k, n);
+    }
+    src.military = [...merged.values()];
+  }
+}
+// AI double-check: names that NationStates doesn't recognise and no alias explains.
+async function verifyNames() {
+  if (!state.settings.geminiKey) return;
+  const known = Object.entries(state.profiles || {}).filter(([, r]) => r.profile);
+  if (!known.length) return;
+  const unknown = [...new Set(state.sources.flatMap(s => (s.military || []).map(m => m.nation)))]
+    .filter(n => { const k = canonKey(n); return state.census?.[k]?.missing && !state.profiles?.[k]?.profile && !state.aliases?.[k] && !state.aliasBlock?.[k] && !state.nameChecked?.[k]; });
+  if (!unknown.length) return;
+  const out = await gemini(`In a NationStates roleplay, players often use a different country name in RP than their NationStates nation name (for example, the nation "Abenti" roleplays as "Germania").
+These names appear in the RP but are not NationStates nations:
+${unknown.map(n => '- ' + n).join('\n')}
+
+Known NationStates nations, with their full names, alternate names and summaries:
+${known.map(([k, r]) => `- ${r.name} (${r.fullname || 'no full name'}; also known as: ${(r.profile.aka || []).join(', ') || 'none'}): ${r.profile.tagline || ''}`).join('\n')}
+
+For each unknown name, say which known nation it is, only if the evidence is strong (same country name, demonym, leader or clear description). Otherwise null. Factions, organisations and NPC states are usually not player nations.
+Reply with JSON only: {"matches":[{"name":"unknown name","sameAs":"known NationStates nation name or null","confidence":0.0-1.0,"why":"at most 12 words"}]}`);
+  state.nameChecked = state.nameChecked || {};
+  for (const m of Array.isArray(out.matches) ? out.matches : []) {
+    const k = slug(cleanName(m.name));
+    state.nameChecked[k] = Date.now();
+    if (m.sameAs && Number(m.confidence) >= 0.75 && state.profiles?.[slug(m.sameAs)]?.profile) {
+      addAlias(m.name, m.sameAs, 'ai');
+      toast(`Matched “${cleanName(m.name)}” to ${state.profiles[slug(m.sameAs)].name} (${String(m.why || '').slice(0, 80)}). Undo it in the Order of Battle.`, 9000);
+    }
+  }
+  save(); render();
+}
+
 /* ---------- Nation dossiers ----------
    Built by Gemini from a nation's own dispatches, attached factbooks and the leader's pasted notes.
    Kept per nation (shared by every workspace) in state.profiles[slug]. */
 const PROFILE_SECTIONS = ['Government & politics', 'Culture & society', 'Economy', 'Military & doctrine', 'Foreign policy', 'RP style'];
 const CAT_ORDER = { factbook: 0, account: 1, meta: 2, bulletin: 3 };
 function profileText(nation, label, compact) {
-  const p = state.profiles?.[slug(nation)]?.profile;
+  const p = state.profiles?.[canonKey(nation)]?.profile;
   if (!p) return '';
   const secs = (p.sections || []).filter(x => !compact || /military|foreign|rp style/i.test(x.title));
   return `${label}:
@@ -552,7 +645,7 @@ Voice in RP posts: ${p.voice || 'unknown'}
 async function buildProfile(nation, isOurs, quiet) {
   const say = (m, ms) => { if (!quiet) toast(m, ms); };
   state.profiles = state.profiles || {};
-  const k = slug(nation), old = state.profiles[k] || {};
+  const k = canonKey(nation), old = state.profiles[k] || {};
   const rec = { ...old, name: nation, notes: old.notes || '' };
   const notesAtStart = (isOurs ? state.settings.lore : rec.notes || '').trim(); // read now: the workspace may change while we fetch
   let docs = [], budget = 90000;
@@ -595,19 +688,22 @@ Reply with JSON only:
 "sections":[${PROFILE_SECTIONS.map(t => `{"title":"${t}","points":["2 to 4 points"]}`).join(',')}],
 "figures":[{"name":"person","role":"their role"}],
 "allies":["nation names"],"rivals":["nation names"],
-"voice":"how this nation writes its RP posts: tone, register, formatting habits, recurring phrases; at most 40 words"}
+"voice":"how this nation writes its RP posts: tone, register, formatting habits, recurring phrases; at most 40 words",
+"aka":["every other name this nation goes by in RP or its dispatches: its in-character country name, short names, former names (not demonyms, not allies)"]}
 "RP style" means how the player writes and roleplays this nation: post length, formality, in-character conventions, use of news reports or press releases, and so on.`);
   const list = (x, n) => (Array.isArray(x) ? x : []).map(String).filter(Boolean).slice(0, n);
   rec.profile = {
     tagline: String(out.tagline || ''),
     sections: (Array.isArray(out.sections) ? out.sections : []).map(x => ({ title: String(x.title || ''), points: list(x.points, 5) })).filter(x => x.title),
     figures: (Array.isArray(out.figures) ? out.figures : []).map(f => ({ name: String(f.name || ''), role: String(f.role || '') })).filter(f => f.name).slice(0, 8),
-    allies: list(out.allies, 10), rivals: list(out.rivals, 10), voice: String(out.voice || '')
+    allies: list(out.allies, 10), rivals: list(out.rivals, 10), voice: String(out.voice || ''),
+    aka: list(out.aka, 8).map(cleanName).filter(a => a && slug(a) !== k)
   };
   rec.sources = docs.map(d => ({ title: d.title, cat: d.cat, url: d.url }));
   rec.usedNotes = !!notes;
   rec.at = Date.now();
   state.profiles[k] = rec;
+  normalizeAllMilitary();
   save();
 }
 
@@ -639,7 +735,7 @@ async function loadCensus(names) {
   state.census = state.census || {};
   let changed = false;
   for (const n of names.slice(0, 15)) {
-    const k = slug(n), c = state.census[k];
+    const k = canonKey(n), c = state.census[k];
     if (c && Date.now() - c.at < 12 * 3600e3) continue;
     try {
       const x = await nsApi({ nation: k, q: 'census', scale: '46', mode: 'score rank' });
@@ -674,7 +770,7 @@ Your latest briefs: ${(src.briefs || []).map(b => b.role + ': ' + b.brief).join(
 Military standings:
 ${militaryLines(src)}
 ${opts.noFactbooks ? '' : factbookBlock((src.military || []).map(m => m.nation))}
-${(src.military || []).filter(m => slug(m.nation) !== slug(state.settings.nation)).map(m => profileText(m.nation, 'DOSSIER: ' + m.nation, true)).filter(Boolean).join('\n')}`;
+${(src.military || []).filter(m => canonKey(m.nation) !== canonKey(state.settings.nation)).map(m => profileText(m.nation, 'DOSSIER: ' + m.nation, true)).filter(Boolean).join('\n')}`;
   return Object.assign(new String(c), { chat: src.chat });
 }
 function overviewContext() {
@@ -780,7 +876,7 @@ async function autoDossiers() {
   try {
     const names = new Map();
     if (state.settings.nation) names.set(slug(state.settings.nation), state.settings.nation);
-    state.sources.forEach(src => (src.military || []).forEach(m => names.set(slug(m.nation), m.nation)));
+    state.sources.forEach(src => (src.military || []).forEach(m => names.set(canonKey(m.nation), m.nation)));
     for (const [k, name] of names) {
       const rec = state.profiles?.[k];
       const stale = !rec?.profile ? !(rec?.failedAt && Date.now() - rec.failedAt < 24 * 3600e3) : Date.now() - (rec.at || 0) > 7 * 24 * 3600e3;
@@ -790,6 +886,7 @@ async function autoDossiers() {
       finally { busy.delete('profile:' + k); }
       render();
     }
+    try { await verifyNames(); } catch (e) { /* retried next time */ }
   } finally { autoRunning = false; }
 }
 async function autoRefresh() {
@@ -823,7 +920,7 @@ function orbatList() {
   if (src) return { list: withFactbookScores(src.military), src };
   const merged = new Map();
   state.sources.slice().sort((a, b) => (a.militaryAt || 0) - (b.militaryAt || 0))
-    .forEach(s => (s.military || []).forEach(m => merged.set(slug(m.nation), { ...m, file: s.name })));
+    .forEach(s => (s.military || []).forEach(m => merged.set(canonKey(m.nation), { ...m, file: s.name })));
   return { list: withFactbookScores([...merged.values()]), src: null };
 }
 const openRanks = new Set();
@@ -831,14 +928,14 @@ function renderOrbat() {
   const el = $('#orbat');
   const { list, src } = orbatList();
   const census = state.census || {};
-  const us = [slug(state.settings.nation), slug(state.banner?.name)].filter(Boolean);
-  const rows = list.slice().sort((a, b) => b.strength - a.strength || ((census[slug(b.nation)]?.score || 0) - (census[slug(a.nation)]?.score || 0)));
+  const us = [canonKey(state.settings.nation), slug(state.banner?.name)].filter(Boolean);
+  const rows = list.slice().sort((a, b) => b.strength - a.strength || ((census[canonKey(b.nation)]?.score || 0) - (census[canonKey(a.nation)]?.score || 0)));
   const arrow = { up: '▲', down: '▼', steady: '–' };
   const trendWord = { up: 'rising', down: 'falling', steady: 'steady' };
   el.innerHTML = `
     <p class="dim orbat-sub">${src ? esc(src.name) : 'All files combined'} · tap a nation for details</p>
     ${rows.length ? `<ol class="ranks">${rows.map((m, i) => {
-      const k = slug(m.nation), c = census[k];
+      const k = canonKey(m.nation), c = census[k];
       const ns = c && !c.missing && c.score ? `NS Defense ${Math.round(c.score).toLocaleString()} · #${c.rank.toLocaleString()} world` : c?.missing ? 'Not a NationStates nation' : '';
       const fbs = state.factbooks?.[k] || [];
       return `<li class="rank ${us.includes(k) ? 'us' : ''}">
@@ -854,6 +951,7 @@ function renderOrbat() {
           <div class="rank-detail">
             ${m.assets ? `<div class="rank-meta">${esc(m.assets)}</div>` : ''}
             ${m.note ? `<div class="rank-note">${esc(m.note)}</div>` : ''}
+            ${akaHTML(k, m.nation)}
             <div class="rank-ns mono">${m.basis === 'factbook' ? 'RATED FROM FACTBOOK' : 'RATED FROM RP POSTS'}${ns ? ' · ' + esc(ns) : ''}${m.file && !src ? ' · ' + esc(m.file) : ''}</div>
             <div class="fb-list">
               ${fbs.map((f, j) => `<span class="fb-chip">
@@ -871,7 +969,7 @@ function renderOrbat() {
       <button class="btn ghost small" data-act="reassess" ${busy.has('mil') ? 'disabled' : ''}>${busy.has('mil') ? '<span class="spin">Assessing</span>' : 'Reassess'}</button>
       <button class="btn ghost small" data-act="track">+ Nation</button>
     </div>` : ''}
-    ${rows.some(m => !state.profiles?.[slug(m.nation)]?.profile) ? `<button class="btn ghost small" data-act="buildAll" ${busy.has('buildAll') ? 'disabled' : ''}>${busy.has('buildAll') ? '<span class="spin">Building dossiers</span>' : 'Build missing dossiers'}</button>` : ''}`;
+    ${rows.some(m => !state.profiles?.[canonKey(m.nation)]?.profile) ? `<button class="btn ghost small" data-act="buildAll" ${busy.has('buildAll') ? 'disabled' : ''}>${busy.has('buildAll') ? '<span class="spin">Building dossiers</span>' : 'Build missing dossiers'}</button>` : ''}`;
 }
 
 /* NationStates-style banner for the leader's own nation */
@@ -928,6 +1026,11 @@ function eventHTML(e, i, showSource) {
 
 
 /* ---------- Dossier + drafter views ---------- */
+function akaHTML(k, name, onPaper) {
+  const aka = akaOf(k);
+  const by = a => state.aliases?.[slug(a)]?.by;
+  return `<div class="aka ${onPaper ? 'paper' : ''}"><span class="aka-label">aka</span>${aka.map(a => `<span class="aka-chip" title="${by(a) === 'ai' ? 'Matched by the AI double-check' : by(a) === 'you' ? 'Added by you' : 'Found in its dispatches'}">${esc(a)}${by(a) === 'ai' ? ' <span class=\"aka-ai\">AI</span>' : ''}<button class="aka-x" data-aliasrm="${esc(a)}" aria-label="Unlink the name ${esc(a)}">\u00d7</button></span>`).join('')}<button class="aka-add" data-aliasadd="${esc(name)}" aria-label="Add another name for ${esc(name)}">+ name</button></div>`;
+}
 let uiDraft = null, uiStance = '';
 function dossierHTML(k, ours) {
   const rec = state.profiles?.[k] || {};
@@ -942,7 +1045,7 @@ function dossierHTML(k, ours) {
     <div class="sheet-head">
       <div class="dossier-id">
         ${flag ? `<img src="${esc(flag)}" alt="Flag of ${esc(name)}" class="dossier-flag">` : ''}
-        <div><h2 class="typed">${esc(name)}</h2><div class="muted">${p?.tagline ? esc(p.tagline) : ours ? 'Your nation’s dossier' : 'Nation dossier'}</div></div>
+        <div><div class="dossier-name"><h2 class="typed">${esc(name)}</h2>${akaHTML(k, name, true)}</div><div class="muted">${p?.tagline ? esc(p.tagline) : ours ? 'Your nation’s dossier' : 'Nation dossier'}</div></div>
       </div>
       <div class="sheet-actions">
         <button class="btn red" data-act="buildProfile" data-nation="${esc(name)}" ${building ? 'disabled' : ''}>${building ? '<span class="spin">Reading dispatches</span>' : p ? 'Rebuild dossier' : 'Build dossier'}</button>
@@ -1130,10 +1233,44 @@ function exportSetup() {
   a.download = 'ns-advisor-setup-' + new Date().toISOString().slice(0, 10) + '.json'; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
+function mergeSetup(data) {
+  const inc = migrateWs({ ...fresh(), ...data, settings: { ...fresh().settings, ...data.settings } });
+  // Incoming workspaces, each with its data unpacked.
+  const incWs = inc.workspaces.map(w => ({ name: w.name, data: w.id === inc.activeWs ? {
+    nation: inc.settings.nation, lore: inc.settings.lore, advisors: inc.settings.advisors, sources: inc.sources, overview: inc.overview, selected: inc.selected, banner: inc.banner } : (w.data || {}) }));
+  activeWs().data = null;
+  for (const w of incWs) {
+    const mine = state.workspaces.find(x => x.name.toLowerCase() === w.name.toLowerCase());
+    if (!mine) { state.workspaces.push({ id: uid(), name: w.name, data: w.data }); continue; }
+    const live = mine.id === state.activeWs;
+    const d = live ? packActive() : (mine.data || {});
+    const lore = (w.data.lore || '').trim();
+    if (lore && !(d.lore || '').includes(lore.slice(0, 200))) d.lore = ((d.lore || '').trim() + '\n\n' + lore).trim();
+    const have = new Set((d.sources || []).map(x => x.type + '|' + (x.target || x.name)));
+    d.sources = [...(d.sources || []), ...(w.data.sources || []).filter(x => !have.has(x.type + '|' + (x.target || x.name)))];
+    if (live) unpack(d); else mine.data = d;
+  }
+  activeWs().data = null;
+  // Shared data: keep the newest of each.
+  state.profiles = state.profiles || {};
+  for (const [k, r] of Object.entries(inc.profiles || {})) if (!state.profiles[k]?.at || (r.at || 0) > state.profiles[k].at) state.profiles[k] = { ...state.profiles[k], ...r };
+  state.factbooks = state.factbooks || {};
+  for (const [k, list] of Object.entries(inc.factbooks || {})) {
+    const mine = state.factbooks[k] = state.factbooks[k] || [];
+    list.forEach(f => { if (!mine.some(x => x.url === f.url)) mine.push(f); });
+  }
+  state.aliases = { ...(inc.aliases || {}), ...(state.aliases || {}) };
+  state.fbScores = { ...(inc.fbScores || {}), ...(state.fbScores || {}) };
+  if (!state.settings.proxy) state.settings.proxy = inc.settings.proxy || DEFAULT_PROXY;
+  normalizeAllMilitary();
+}
 async function importSetup(file) {
   try {
     const data = JSON.parse(await file.text());
     if (!data.settings || !Array.isArray(data.sources)) throw new Error();
+    if (confirm('Merge this setup into what\u2019s already here?\n\nOK = merge (keeps everything you have, adds what\u2019s new)\nCancel = replace everything with the file')) {
+      mergeSetup(data); save(); $('#settingsDlg').close(); render(); toast('Setup merged.'); return;
+    }
     const key = state.settings.geminiKey;
     state = migrateWs({ ...fresh(), ...data, settings: { ...fresh().settings, ...data.settings, geminiKey: data.settings.geminiKey || key } });
     save(); $('#settingsDlg').close(); render(); toast('Setup imported.');
@@ -1174,11 +1311,24 @@ document.addEventListener('click', e => {
   if (opt) { if (!busy.has('chat')) sendDirective('I’m considering: ' + opt.dataset.option + '. Advise me.'); return; }
   const prof = e.target.closest('[data-profile]');
   if (prof) {
-    const k = slug(prof.dataset.profile);
+    const k = canonKey(prof.dataset.profile);
     state.profiles = state.profiles || {};
     state.profiles[k] = state.profiles[k] || { name: prof.dataset.profile, notes: '' };
     state.selected = k === slug(state.settings.nation) ? 'dossier' : 'nation:' + k;
     save(); render(); $('#file').scrollTop = 0; return;
+  }
+  const akaAdd = e.target.closest('[data-aliasadd]');
+  if (akaAdd) {
+    const target = akaAdd.dataset.aliasadd;
+    const n = prompt(`Another name ${target} uses in RP (for example its in-character country name):`);
+    if (n && cleanName(n)) { addAlias(n, target, 'you'); toast(`\u201c${cleanName(n)}\u201d now counts as ${canonName(target)}.`); render(); }
+    return;
+  }
+  const akaRm = e.target.closest('[data-aliasrm]');
+  if (akaRm) {
+    const a = akaRm.dataset.aliasrm;
+    if (confirm(`Stop treating \u201c${a}\u201d as this nation?`)) { removeAlias(a); render(); }
+    return;
   }
   const stanceBtn = e.target.closest('[data-stance]');
   if (stanceBtn) { uiStance = stanceBtn.dataset.stance; const t = $('#stance'); if (t) { t.value = uiStance; t.focus(); } return; }
@@ -1209,11 +1359,11 @@ document.addEventListener('click', e => {
   if (act === 'buildAll') {
     if (!state.settings.geminiKey) { toast('Add your Gemini key in Settings first.'); return; }
     if (busy.has('buildAll')) return;
-    const names = orbatList().list.map(m => m.nation).filter(n => !state.profiles?.[slug(n)]?.profile);
+    const names = orbatList().list.map(m => m.nation).filter(n => !state.profiles?.[canonKey(n)]?.profile);
     busy.add('buildAll'); renderOrbat();
     (async () => {
       const failed = [];
-      for (const n of names) { try { await buildProfile(n, slug(n) === slug(state.settings.nation)); } catch (err) { failed.push(n); } }
+      for (const n of names) { try { await buildProfile(n, canonKey(n) === canonKey(state.settings.nation)); } catch (err) { failed.push(n); } }
       toast(failed.length ? `Built ${names.length - failed.length}. No dispatches found for: ${failed.join(', ')} (paste notes on their dossier).` : `Built ${names.length} dossier${names.length === 1 ? '' : 's'}.`, 9000);
     })().finally(() => { busy.delete('buildAll'); render(); });
     return;
@@ -1230,7 +1380,7 @@ document.addEventListener('click', e => {
   if (act === 'buildProfile' || act === 'saveNotesBuild') {
     const name = e.target.closest('[data-act]').dataset.nation;
     if (!state.settings.geminiKey) { toast('Add your Gemini key in Settings first.'); return; }
-    const k = slug(name), ours = state.selected === 'dossier';
+    const k = canonKey(name), ours = state.selected === 'dossier';
     if (busy.has('profile:' + k)) return;
     busy.add('profile:' + k); renderSheet();
     buildProfile(name, ours).then(() => toast(`${name}’s dossier is ready.`)).catch(err => toast(err.message, 9000))
@@ -1270,7 +1420,7 @@ document.addEventListener('click', e => {
     const n = prompt('Nation to add to the order of battle (its NationStates name):');
     if (n && n.trim()) {
       src.military = src.military || [];
-      if (!src.military.some(m => slug(m.nation) === slug(n))) src.military.push({ nation: n.trim(), strength: 0, assets: 'Not assessed yet', trend: 'steady', note: 'Press Reassess forces to rate this nation.' });
+      if (!src.military.some(m => canonKey(m.nation) === canonKey(n))) src.military.push({ nation: n.trim(), strength: 0, assets: 'Not assessed yet', trend: 'steady', note: 'Press Reassess forces to rate this nation.' });
       save(); render(); loadCensus([n.trim()]);
     }
   }
@@ -1351,6 +1501,7 @@ document.addEventListener('click', e => {
   document.querySelectorAll('details.more[open]').forEach(d => { if (!d.contains(e.target)) d.removeAttribute('open'); });
 });
 
+normalizeAllMilitary();
 render();
 loadBanner(false);
 setTimeout(autoDossiers, 4000);
