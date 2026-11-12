@@ -1269,7 +1269,7 @@ function renderCouncil() {
   const briefs = holder.briefs || [];
   $('#briefs').innerHTML = briefs.length
     ? briefs.map(b => `<div class="memo"><div class="from">${esc(b.role)}</div><div class="text">${esc(b.brief)}</div></div>`).join('')
-    : `<p class="empty">${src ? 'Your ministers write here after the first analysis.' : 'Press “Get AI assessment” for a briefing across all files.'}</p>`;
+    : `<p class="empty">${src ? 'Your ministers write here after the first analysis.' : 'No briefing yet.'}</p>${src ? '' : `<button class="btn red small" data-act="assess" ${busy.has('overview') ? 'disabled' : ''}>${busy.has('overview') ? '<span class="spin">Convening</span>' : 'Get AI assessment'}</button>`}`;
   $('#options').innerHTML = (holder.options || []).map((o, i) =>
     `<button class="btn ${i === 0 ? 'red' : 'ghost'} small" data-option="${esc(o)}">${esc(o)}</button>`).join('');
   $('#chat').innerHTML = (holder.chat || []).map(m => m.role === 'You'

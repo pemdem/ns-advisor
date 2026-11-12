@@ -415,3 +415,6 @@ label.inline{font-size:13px;font-weight:700}
   .dlg{padding:16px 14px calc(24px + env(safe-area-inset-bottom))}
   .more .menu{right:0;min-width:200px}
 }
+@media (max-width:999px){
+  .panel,.panel-scroll{flex:none;min-height:auto;overflow:visible}
+}
