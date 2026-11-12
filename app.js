@@ -259,12 +259,67 @@ ${src.events.slice(-10).map(eventLine).join('\n') || '(none)'}
 NEW MATERIAL, oldest first:
 ${items.map(i => `[${i.time ? new Date(i.time).toISOString().slice(0, 16).replace('T', ' ') : 'pasted'}] ${i.author}: ${i.text}`).join('\n\n')}
 
+Current military standings in this case (update these):
+${militaryLines(src)}
+
 Reply with JSON only, in exactly this shape:
-{"events":[{"title":"short headline","detail":"1-2 sentences: what happened and why it matters to us","actor":"who did it","tag":"Escalation | Diplomacy | Intel | Military | Economy | Domestic | Ultimatum | Other"}],
+{"military":[${MILITARY_SHAPE}],
+"events":[{"title":"short headline","detail":"1-2 sentences: what happened and why it matters to us","actor":"who did it","tag":"Escalation | Diplomacy | Intel | Military | Economy | Domestic | Ultimatum | Other"}],
 "summary":"updated running summary of the whole case so far, at most 250 words; keep names, numbers, deadlines and open threats",
 "briefs":[{"role":"one of the council roles exactly as written above","brief":"2-3 sentences of advice in character, addressed to the leader"}],
 "options":["3 or 4 possible courses of action, 2-5 words each"]}
-Break the new material into the distinct things that happened, in order. Merge repetitive chatter. If nothing of substance happened, return an empty events list but still update briefs. Every council member gives a brief.`;
+Break the new material into the distinct things that happened, in order. Merge repetitive chatter. If nothing of substance happened, return an empty events list but still update briefs. Every council member gives a brief.
+${militaryRules()}`;
+}
+
+const MILITARY_SHAPE = '{"nation":"nation name as used in the RP","strength":0-100,"assets":"key forces in under 12 words","trend":"up | down | steady","note":"one short sentence: why"}';
+const MILITARY_RULES = `Military standings: list every nation that is an actor in this case, including "${'${us}'}" (our nation), ranked by current military strength in the RP (100 = overwhelming). Judge only from what the RP, the summary and the context say: posted force sizes, deployments, losses, alliances that commit troops. Keep a nation's previous strength when there is no new information. If a nation's forces are unknown, give your best estimate and say so in the note.`;
+function militaryLines(src) {
+  const m = src.military || [];
+  return m.length ? m.map(x => `- ${x.nation}: ${x.strength ?? '?'} (${x.assets || 'unknown'}; trend ${x.trend || 'steady'})`).join('\n') : '(none assessed yet)';
+}
+function militaryRules() { return MILITARY_RULES.replace('${us}', state.settings.nation || 'our nation'); }
+function cleanMilitary(list) {
+  const seen = new Set();
+  return (Array.isArray(list) ? list : []).map(x => ({
+    nation: String(x.nation || '').trim(), strength: Math.max(0, Math.min(100, Math.round(Number(x.strength)))),
+    assets: String(x.assets || ''), trend: ['up', 'down', 'steady'].includes(x.trend) ? x.trend : 'steady', note: String(x.note || '')
+  })).filter(x => x.nation && !Number.isNaN(x.strength) && !seen.has(slug(x.nation)) && seen.add(slug(x.nation)));
+}
+
+async function reassessMilitary(src) {
+  const out = await gemini(`${councilBlock()}
+
+${sourceContext(src)}
+
+Recent raw material (newest last):
+${src.raw.slice(-40).map(i => `${i.author}: ${i.text.slice(0, 1500)}`).join('\n\n') || '(none)'}
+
+Current military standings in this case (update these):
+${militaryLines(src)}
+
+${militaryRules()}
+Reply with JSON only: {"military":[${MILITARY_SHAPE}]}`);
+  const m = cleanMilitary(out.military);
+  if (m.length) { src.military = m; src.militaryAt = Date.now(); }
+}
+
+/* Official NationStates "Defense Forces" census (scale 46), cached 12 h per nation */
+async function loadCensus(names) {
+  state.census = state.census || {};
+  let changed = false;
+  for (const n of names.slice(0, 15)) {
+    const k = slug(n), c = state.census[k];
+    if (c && Date.now() - c.at < 12 * 3600e3) continue;
+    try {
+      const x = await nsApi({ nation: k, q: 'census', scale: '46', mode: 'score rank' });
+      state.census[k] = x.querySelector('NATION')
+        ? { at: Date.now(), score: Number(xt(x, 'SCORE')), rank: Number(xt(x, 'RANK')) }
+        : { at: Date.now(), missing: true };
+    } catch (e) { state.census[k] = { at: Date.now(), missing: true }; }
+    changed = true;
+  }
+  if (changed) { save(); renderOrbat(); }
 }
 
 function chatPrompt(ctx, msg) {
@@ -318,10 +373,13 @@ async function analyze(src) {
     if (out.summary) src.summary = String(out.summary);
     if (Array.isArray(out.briefs) && out.briefs.length) src.briefs = out.briefs.map(b => ({ role: String(b.role), brief: String(b.brief) }));
     if (Array.isArray(out.options)) src.options = out.options.map(String).slice(0, 4);
+    const mil = cleanMilitary(out.military);
+    if (mil.length) { src.military = mil; src.militaryAt = Date.now(); }
     chunks[n].forEach(i => { i.analyzed = true; });
     save(); render();
   }
   toast('Report filed.');
+  loadCensus((src.military || []).map(m => m.nation));
 }
 
 async function syncAndAnalyze(src, { quiet } = {}) {
@@ -384,7 +442,48 @@ Reply with JSON only: {"briefs":[{"role":"council role exactly as written above"
 function render() {
   const last = Math.max(0, ...state.sources.map(s => s.lastSync || 0));
   $('#nationLine').textContent = !state.settings.nation ? 'SET YOUR NATION IN SETTINGS' : last ? 'LAST SYNC ' + fmtTime(last).toUpperCase() : 'NO REPORTS YET';
-  renderBanner(); renderFiles(); renderSheet(); renderCouncil();
+  renderBanner(); renderFiles(); renderSheet(); renderCouncil(); renderOrbat();
+}
+
+/* Order of Battle: military ranking of every nation in the RP */
+function orbatList() {
+  const src = current();
+  if (src) return { list: src.military || [], src };
+  const merged = new Map();
+  state.sources.slice().sort((a, b) => (a.militaryAt || 0) - (b.militaryAt || 0))
+    .forEach(s => (s.military || []).forEach(m => merged.set(slug(m.nation), { ...m, file: s.name })));
+  return { list: [...merged.values()], src: null };
+}
+function renderOrbat() {
+  const el = $('#orbat');
+  const { list, src } = orbatList();
+  const census = state.census || {};
+  const us = [slug(state.settings.nation), slug(state.banner?.name)].filter(Boolean);
+  const rows = list.slice().sort((a, b) => b.strength - a.strength || ((census[slug(b.nation)]?.score || 0) - (census[slug(a.nation)]?.score || 0)));
+  const arrow = { up: '▲', down: '▼', steady: '■' };
+  const trendWord = { up: 'rising', down: 'falling', steady: 'steady' };
+  el.innerHTML = `
+    <h2 class="label">Order of battle</h2>
+    <p class="dim orbat-sub">${src ? 'Military strength in ' + esc(src.name) : 'All RPs combined'}</p>
+    ${rows.length ? `<ol class="ranks">${rows.map((m, i) => {
+      const c = census[slug(m.nation)];
+      const ns = c && !c.missing && c.score ? `NS Defense ${Math.round(c.score).toLocaleString()} · #${c.rank.toLocaleString()} world` : c?.missing ? 'Not a NationStates nation' : '';
+      return `<li class="rank-row ${us.includes(slug(m.nation)) ? 'us' : ''}">
+        <span class="rank-no">${i + 1}</span>
+        <div class="rank-body">
+          <div class="rank-top"><b>${esc(m.nation)}</b><span class="trend ${m.trend}" title="${trendWord[m.trend]}" aria-label="${trendWord[m.trend]}">${arrow[m.trend]}</span><span class="score">${m.strength}</span></div>
+          <div class="bar" aria-hidden="true"><span style="width:${m.strength}%"></span></div>
+          ${m.assets ? `<div class="rank-meta">${esc(m.assets)}</div>` : ''}
+          ${m.note ? `<div class="rank-note">${esc(m.note)}</div>` : ''}
+          ${ns ? `<div class="rank-ns mono">${esc(ns)}</div>` : ''}
+          ${m.file && !src ? `<div class="rank-ns mono">FILE: ${esc(m.file)}</div>` : ''}
+        </div>
+      </li>`;
+    }).join('')}</ol>` : `<p class="dim orbat-sub">${src ? 'Your advisors rank the forces after the next analysis, or press Reassess.' : 'Rankings appear once an RP file has been analyzed.'}</p>`}
+    ${src ? `<div class="row wrap">
+      <button class="btn ghost small" data-act="reassess" ${busy.has('mil') ? 'disabled' : ''}>${busy.has('mil') ? '<span class="spin">Assessing</span>' : 'Reassess forces'}</button>
+      <button class="btn ghost small" data-act="track">+ Track a nation</button>
+    </div>` : ''}`;
 }
 
 /* NationStates-style banner for the leader's own nation */
@@ -587,6 +686,20 @@ document.addEventListener('click', e => {
   if (!src) return;
   if (act === 'sync') syncAndAnalyze(src);
   if (act === 'analyze') { busy.add(src.id); render(); analyze(src).catch(err => toast(err.message, 8000)).finally(() => { busy.delete(src.id); render(); }); }
+  if (act === 'reassess') {
+    if (busy.has('mil')) return;
+    busy.add('mil'); renderOrbat();
+    reassessMilitary(src).then(() => { save(); loadCensus((src.military || []).map(m => m.nation)); })
+      .catch(err => toast(err.message, 8000)).finally(() => { busy.delete('mil'); render(); });
+  }
+  if (act === 'track') {
+    const n = prompt('Nation to add to the order of battle (its NationStates name):');
+    if (n && n.trim()) {
+      src.military = src.military || [];
+      if (!src.military.some(m => slug(m.nation) === slug(n))) src.military.push({ nation: n.trim(), strength: 0, assets: 'Not assessed yet', trend: 'steady', note: 'Press Reassess forces to rate this nation.' });
+      save(); render(); loadCensus([n.trim()]);
+    }
+  }
   if (act === 'rename') { const n = prompt('New name for this file:', src.name); if (n && n.trim()) { src.name = n.trim(); save(); render(); } }
   if (act === 'close') { if (confirm(`Close “${src.name}”? Its event chain will be removed from this device.`)) { state.sources = state.sources.filter(s => s !== src); state.selected = 'overview'; save(); render(); } }
   if (act === 'paste') {
