@@ -22,7 +22,8 @@ function fresh() {
     settings: { nation: '', geminiKey: '', model: '', proxy: '', lore: '', advisors: DEFAULT_ADVISORS.map(a => ({ ...a })) },
     sources: [],
     overview: { briefs: [], options: [], chat: [] },
-    selected: 'overview'
+    selected: 'overview',
+    workspaces: [], activeWs: null
   };
 }
 function load() {
@@ -30,14 +31,81 @@ function load() {
     const s = JSON.parse(localStorage.getItem(LS_KEY));
     if (s && s.settings) {
       const f = fresh();
-      return { ...f, ...s, settings: { ...f.settings, ...s.settings }, overview: { ...f.overview, ...(s.overview || {}) } };
+      return migrateWs({ ...f, ...s, settings: { ...f.settings, ...s.settings }, overview: { ...f.overview, ...(s.overview || {}) } });
     }
   } catch (e) { /* fall through */ }
-  return fresh();
+  return migrateWs(fresh());
+}
+/* Workspaces: one per nation or RP campaign. The active workspace's data lives at the top level of
+   state (settings.nation/lore/advisors, sources, overview, selected, banner); the others are parked
+   in state.workspaces[i].data. The Gemini key, model, proxy, factbooks and census are shared. */
+function migrateWs(st) {
+  if (!Array.isArray(st.workspaces) || !st.workspaces.length) {
+    const id = Math.random().toString(36).slice(2, 10);
+    st.workspaces = [{ id, name: st.settings.nation || 'My nation', data: null }];
+    st.activeWs = id;
+  }
+  if (!st.workspaces.some(w => w.id === st.activeWs)) st.activeWs = st.workspaces[0].id;
+  return st;
 }
 function save() {
   try { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
   catch (e) { toast('This browser’s storage is full. Close an old file or clear its raw intel.'); }
+}
+
+const activeWs = () => state.workspaces.find(w => w.id === state.activeWs);
+function packActive() {
+  return {
+    nation: state.settings.nation, lore: state.settings.lore, advisors: state.settings.advisors,
+    sources: state.sources, overview: state.overview, selected: state.selected, banner: state.banner || null
+  };
+}
+function unpack(d) {
+  const f = fresh();
+  state.settings.nation = d.nation || '';
+  state.settings.lore = d.lore || '';
+  state.settings.advisors = d.advisors?.length ? d.advisors : DEFAULT_ADVISORS.map(a => ({ ...a }));
+  state.sources = d.sources || [];
+  state.overview = { ...f.overview, ...(d.overview || {}) };
+  state.selected = d.selected || 'overview';
+  state.banner = d.banner || null;
+}
+function switchWs(id) {
+  if (id === state.activeWs) return;
+  const from = activeWs(), to = state.workspaces.find(w => w.id === id);
+  if (!to) return;
+  from.data = packActive();
+  unpack(to.data || {});
+  to.data = null;
+  state.activeWs = id;
+  uiPaste = null; openRanks.clear();
+  save(); render(); loadBanner(false);
+}
+function createWs(name, nation) {
+  const id = uid();
+  state.workspaces.push({ id, name: name || nation || 'New workspace', data: { nation, lore: '', advisors: DEFAULT_ADVISORS.map(a => ({ ...a })), sources: [], selected: 'overview' } });
+  switchWs(id);
+}
+function deleteWs(id) {
+  if (state.workspaces.length < 2) { toast('You need at least one workspace.'); return; }
+  const w = state.workspaces.find(x => x.id === id);
+  if (!w || !confirm(`Delete the workspace “${w.name}” and all its files? This can’t be undone.`)) return;
+  if (id === state.activeWs) switchWs(state.workspaces.find(x => x.id !== id).id);
+  state.workspaces = state.workspaces.filter(x => x.id !== id);
+  save(); renderWsMenu();
+}
+function wsInfo(w) {
+  const d = w.id === state.activeWs ? packActive() : (w.data || {});
+  return { flag: d.banner?.flag || '', nation: d.banner?.name || d.nation || '', files: (d.sources || []).length };
+}
+function renderWsMenu() {
+  $('#wsList').innerHTML = state.workspaces.map(w => {
+    const i = wsInfo(w), on = w.id === state.activeWs;
+    return `<li><button class="ws-item ${on ? 'on' : ''}" data-ws="${w.id}" aria-current="${on}">
+      ${i.flag ? `<img src="${esc(i.flag)}" alt="" class="ws-flag">` : '<span class="ws-flag blank" aria-hidden="true"></span>'}
+      <span class="ws-text"><b>${esc(w.name)}</b><span>${esc(i.nation || 'No nation set')} · ${i.files} file${i.files === 1 ? '' : 's'}</span></span>
+    </button></li>`;
+  }).join('');
 }
 
 /* ---------- helpers ---------- */
@@ -271,6 +339,28 @@ ${s.lore.trim() || '(nothing given)'}`;
 }
 const eventLine = e => `- ${e.title} (${e.tag}; ${e.actor}): ${e.detail}`;
 
+const ASSESS_SHAPE = '{"threat":"low | elevated | high | critical","headline":"the situation in at most 12 words","points":["3 to 5 key points, each at most 12 words"],"watch":["2 or 3 things to watch next, each at most 10 words"]}';
+function cleanAssessment(a) {
+  if (!a || typeof a !== 'object') return null;
+  const list = (x, n) => (Array.isArray(x) ? x : []).map(String).filter(Boolean).slice(0, n);
+  return {
+    threat: ['low', 'elevated', 'high', 'critical'].includes(String(a.threat).toLowerCase()) ? String(a.threat).toLowerCase() : 'elevated',
+    headline: String(a.headline || ''), points: list(a.points, 5), watch: list(a.watch, 3), at: Date.now()
+  };
+}
+async function assessOnly(src) {
+  const out = await gemini(`${councilBlock()}
+
+${src ? sourceContext(src, { noFactbooks: true }) : overviewContext()}
+
+Write the leader's at-a-glance assessment${src ? ' of this case' : ' across every file'}. Be terse: short phrases, no full paragraphs.
+Reply with JSON only: {"assessment":${ASSESS_SHAPE},"briefs":[{"role":"council role exactly as written above","brief":"one or two sentences, at most 30 words, in character"}],"options":["3 or 4 courses of action, 2-5 words each"]}`);
+  const holder = src || state.overview;
+  holder.assessment = cleanAssessment(out.assessment);
+  if (Array.isArray(out.briefs) && out.briefs.length) holder.briefs = out.briefs.map(b => ({ role: String(b.role), brief: String(b.brief) }));
+  if (Array.isArray(out.options) && out.options.length) holder.options = out.options.map(String).slice(0, 4);
+}
+
 function analysisPrompt(src, items) {
   return `${councilBlock()}
 
@@ -290,11 +380,12 @@ ${militaryLines(src)}
 
 Reply with JSON only, in exactly this shape:
 {"military":[${MILITARY_SHAPE}],
-"events":[{"title":"short headline","detail":"1-2 sentences: what happened and why it matters to us","actor":"who did it","tag":"Escalation | Diplomacy | Intel | Military | Economy | Domestic | Ultimatum | Other"}],
-"summary":"updated running summary of the whole case so far, at most 250 words; keep names, numbers, deadlines and open threats",
-"briefs":[{"role":"one of the council roles exactly as written above","brief":"2-3 sentences of advice in character, addressed to the leader"}],
+"assessment":${ASSESS_SHAPE},
+"events":[{"title":"headline, at most 10 words","detail":"one sentence, at most 25 words: what happened and why it matters to us","actor":"who did it","tag":"Escalation | Diplomacy | Intel | Military | Economy | Domestic | Ultimatum | Other"}],
+"summary":"updated running summary of the whole case so far, at most 200 words; keep names, numbers, deadlines and open threats (this is your memory, the leader rarely reads it)",
+"briefs":[{"role":"one of the council roles exactly as written above","brief":"one or two sentences, at most 30 words, in character, addressed to the leader"}],
 "options":["3 or 4 possible courses of action, 2-5 words each"]}
-Break the new material into the distinct things that happened, in order. Merge repetitive chatter. If nothing of substance happened, return an empty events list but still update briefs. Every council member gives a brief.
+The leader does not want to read long text: keep the assessment, events and briefs short and concrete. Break the new material into the distinct things that happened, in order. Merge repetitive chatter. If nothing of substance happened, return an empty events list but still update the assessment and briefs. Every council member gives a brief.
 ${militaryRules()}`;
 }
 
@@ -459,7 +550,7 @@ ${ctx.chat.slice(-12).map(m => m.role === 'You' ? `LEADER: ${m.text}` : `${m.rol
 
 The leader now says: "${msg}"
 
-Answer as the council. Only the 1-3 members with something useful to say should speak. They may disagree with each other when that is realistic. Be concrete and brief (each reply under 90 words).
+Answer as the council. Only the 1-3 members with something useful to say should speak. They may disagree with each other when that is realistic. Be concrete and brief: each reply at most 50 words, no long paragraphs.
 Reply with JSON only: {"replies":[{"role":"council role exactly as written above","text":"what they say"}],"options":["optional: up to 4 follow-up courses of action, 2-5 words each"]}`;
 }
 function sourceContext(src, opts = {}) {
@@ -502,6 +593,8 @@ async function analyze(src) {
     }));
     src.events = src.events.slice(-MAX_EVENTS);
     if (out.summary) src.summary = String(out.summary);
+    const a = cleanAssessment(out.assessment);
+    if (a) src.assessment = a;
     if (Array.isArray(out.briefs) && out.briefs.length) src.briefs = out.briefs.map(b => ({ role: String(b.role), brief: String(b.brief) }));
     if (Array.isArray(out.options)) src.options = out.options.map(String).slice(0, 4);
     const mil = cleanMilitary(out.military);
@@ -556,16 +649,8 @@ async function sendDirective(text) {
 async function overviewBrief() {
   if (!state.sources.length) { toast('Open a case file first.'); return; }
   busy.add('overview'); render();
-  try {
-    const out = await gemini(`${councilBlock()}
-
-${overviewContext()}
-
-Give the leader a morning briefing across every file: what matters most right now and what to watch.
-Reply with JSON only: {"briefs":[{"role":"council role exactly as written above","brief":"2-4 sentences in character"}],"options":["3 or 4 priorities, 2-6 words each"]}`);
-    state.overview.briefs = (out.briefs || []).map(b => ({ role: String(b.role), brief: String(b.brief) }));
-    state.overview.options = (out.options || []).map(String).slice(0, 4);
-  } catch (e) { toast(e.message, 8000); }
+  try { await assessOnly(null); }
+  catch (e) { toast(e.message, 8000); }
   finally { busy.delete('overview'); save(); render(); }
 }
 
@@ -689,26 +774,44 @@ function renderFiles() {
 
 function eventHTML(e, i, showSource) {
   const src = showSource ? state.sources.find(s => s.id === e.source) : null;
-  return `<div class="event">
-    <div class="no">${i}</div>
-    <div class="body">
-      <div class="title">${esc(e.title)}</div>
-      <div class="detail">${esc(e.detail)}</div>
-      <div class="meta">${esc(e.actor)} · ${esc(e.tag)}${e.time ? ' · ' + esc(fmtTime(e.time)) : ''}${src ? ' · ' + esc(src.name) : ''}</div>
+  return `<details class="event">
+    <summary><span class="no">${i}</span><span class="title">${esc(e.title)}</span><span class="tag tag-${esc(String(e.tag).toLowerCase())}">${esc(e.tag)}</span></summary>
+    <div class="event-more">${esc(e.detail)}<div class="meta">${esc(e.actor)}${e.time ? ' · ' + esc(fmtTime(e.time)) : ''}${src ? ' · ' + esc(src.name) : ''}</div></div>
+  </details>`;
+}
+
+const THREAT_LABEL = { low: 'Low', elevated: 'Elevated', high: 'High', critical: 'Critical' };
+function assessmentHTML(a, holderBusy, canAssess) {
+  if (!a) {
+    return canAssess ? `<section class="assess empty-assess">
+      <p class="empty">No AI assessment yet.</p>
+      <button class="btn red small" data-act="assess" ${holderBusy ? 'disabled' : ''}>${holderBusy ? '<span class="spin">Assessing</span>' : 'Get AI assessment'}</button>
+    </section>` : '';
+  }
+  return `<section class="assess threat-${a.threat}" aria-label="AI assessment">
+    <div class="assess-top">
+      <span class="threat-pill">Threat: ${THREAT_LABEL[a.threat]}</span>
+      <span class="muted">${a.at ? esc(fmtTime(a.at)) : ''}</span>
+      <button class="btn ghost small" data-act="assess" ${holderBusy ? 'disabled' : ''}>${holderBusy ? '<span class="spin">…</span>' : 'Refresh'}</button>
     </div>
-  </div>`;
+    ${a.headline ? `<p class="headline">${esc(a.headline)}</p>` : ''}
+    ${a.points.length ? `<ul class="points">${a.points.map(p => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}
+    ${a.watch.length ? `<div class="watch"><span class="watch-label">Watch</span>${a.watch.map(w => `<span class="watch-chip">${esc(w)}</span>`).join('')}</div>` : ''}
+  </section>`;
 }
 
 function renderSheet() {
   const el = $('#file');
   const src = current();
+  const hasKey = !!state.settings.geminiKey;
   if (!src) {
-    const all = state.sources.flatMap(s => s.events).sort((a, b) => (a.time || 0) - (b.time || 0)).slice(-30).reverse();
+    const all = state.sources.flatMap(s => s.events).sort((a, b) => (a.time || 0) - (b.time || 0)).slice(-40).reverse();
     el.innerHTML = `
-      <div class="sheet-head"><h2 class="typed">Situation overview</h2>
-        <button class="btn red" data-act="overviewBrief" ${busy.has('overview') ? 'disabled' : ''}>${busy.has('overview') ? '<span class="spin">Convening</span>' : 'Brief me'}</button></div>
-      ${!state.sources.length ? `<p class="empty">No files yet. Set your nation and Gemini key in Settings, then add a <b>+ New file</b> for your nation, your region and each RP.</p>` :
-        all.length ? all.map((e, i) => eventHTML(e, all.length - i, true)).join('') : '<p class="empty">No events yet. Press <b>Request new reports</b>.</p>'}`;
+      <div class="sheet-head"><div><h2 class="typed">Situation overview</h2><div class="muted">${esc(activeWs()?.name || '')} · ${state.sources.length} file${state.sources.length === 1 ? '' : 's'}</div></div></div>
+      ${!state.sources.length ? `<p class="empty">No files yet. Set your nation and Gemini key in Settings, then add a <b>+ New file</b> for your nation, your region and each RP.</p>` : `
+        ${assessmentHTML(state.overview.assessment, busy.has('overview'), hasKey)}
+        <h3 class="label ink">Latest events</h3>
+        ${all.length ? `<div class="chain">${all.map((e, i) => eventHTML(e, all.length - i, true)).join('')}</div>` : '<p class="empty">No events yet. Press <b>Request new reports</b>.</p>'}`}`;
     return;
   }
   const pending = src.raw.filter(i => !i.analyzed).length;
@@ -719,7 +822,7 @@ function renderSheet() {
     <div class="sheet-head">
       <div>
         <h2 class="typed">${esc(src.name)}</h2>
-        <div class="muted">${src.lastSync ? 'Read ' + esc(fmtTime(src.lastSync)) : TYPE_LABEL[src.type] === 'INTEL' ? 'Pasted intel' : 'Not read yet'}${src.profile ? ' · ' + esc(src.profile) : ''}</div>
+        <div class="muted">${src.lastSync ? 'Read ' + esc(fmtTime(src.lastSync)) : src.type === 'paste' ? 'Pasted intel' : 'Not read yet'}${src.profile ? ' · ' + esc(src.profile) : ''}</div>
       </div>
       <div class="sheet-actions">
         ${src.type !== 'paste' ? `<button class="btn dark" data-act="sync" ${isBusy ? 'disabled' : ''}>${isBusy ? '<span class="spin">Reading</span>' : 'Pull intel'}</button>` : ''}
@@ -736,14 +839,18 @@ function renderSheet() {
     </div>
     ${showPaste ? `<div class="paste">
       <label for="pasteBox"><b>Add intel by hand</b> <span class="muted">Discord messages, a dispatch, your own post</span></label>
-      <textarea id="pasteBox" rows="5"></textarea>
+      <textarea id="pasteBox" rows="4"></textarea>
       <div class="row end">${src.type !== 'paste' ? '<button class="btn ghost" data-act="pasteToggle">Cancel</button>' : ''}<button class="btn red" data-act="paste">File it</button></div>
     </div>` : ''}
-    ${src.summary ? `<details class="story" open><summary>Story so far</summary><div class="summary">${esc(src.summary)}</div></details>` : ''}
-    ${events.length ? `<div class="chain">${events.map((e, i) => eventHTML(e, events.length - i)).join('')}</div>` : '<p class="empty">No events yet.</p>'}
-    <details class="raw"><summary>Raw intel (${src.raw.length})</summary>
-      ${src.raw.slice().reverse().slice(0, 150).map(r => `<div class="raw-item"><span class="who">${esc(r.author)}</span> <span class="muted">${esc(fmtTime(r.time))}</span>\n${esc(r.text.slice(0, 2000))}</div>`).join('') || '<p class="empty">Nothing yet.</p>'}
-    </details>`;
+    ${assessmentHTML(src.assessment, busy.has('assess:' + src.id), hasKey && (src.summary || src.events.length))}
+    <h3 class="label ink">Event chain <span class="muted">· tap to expand</span></h3>
+    ${events.length ? `<div class="chain">${events.map((e, i) => eventHTML(e, events.length - i)).join('')}</div>` : `<p class="empty">${pending ? 'Press Analyze to build the event chain.' : 'No events yet.'}</p>`}
+    <div class="sheet-foot">
+      ${src.summary ? `<details class="story"><summary>Full story so far</summary><div class="summary">${esc(src.summary)}</div></details>` : ''}
+      <details class="raw"><summary>Raw intel (${src.raw.length})</summary>
+        ${src.raw.slice().reverse().slice(0, 150).map(r => `<div class="raw-item"><span class="who">${esc(r.author)}</span> <span class="muted">${esc(fmtTime(r.time))}</span>\n${esc(r.text.slice(0, 2000))}</div>`).join('') || '<p class="empty">Nothing yet.</p>'}
+      </details>
+    </div>`;
 }
 
 function renderCouncil() {
@@ -752,7 +859,7 @@ function renderCouncil() {
   const briefs = holder.briefs || [];
   $('#briefs').innerHTML = briefs.length
     ? briefs.map(b => `<div class="memo"><div class="from">${esc(b.role)}</div><div class="text">${esc(b.brief)}</div></div>`).join('')
-    : `<p class="empty">${src ? 'Your ministers write here after the first analysis.' : 'Press “Brief me” for a briefing across all files.'}</p>`;
+    : `<p class="empty">${src ? 'Your ministers write here after the first analysis.' : 'Press “Get AI assessment” for a briefing across all files.'}</p>`;
   $('#options').innerHTML = (holder.options || []).map((o, i) =>
     `<button class="btn ${i === 0 ? 'red' : 'ghost'} small" data-option="${esc(o)}">${esc(o)}</button>`).join('');
   $('#chat').innerHTML = (holder.chat || []).map(m => m.role === 'You'
@@ -786,7 +893,9 @@ function readAdvisorEdit() {
 }
 function saveSettings() {
   const s = state.settings;
-  s.nation = $('#sNation').value.trim(); s.geminiKey = $('#sKey').value.trim();
+  const ws = activeWs(), newNation = $('#sNation').value.trim();
+  if (newNation && (!ws.name || ws.name === s.nation || ws.name === 'My nation' || ws.name === 'New workspace')) ws.name = newNation;
+  s.nation = newNation; s.geminiKey = $('#sKey').value.trim();
   s.model = $('#sModel').value; s.lore = $('#sLore').value; s.proxy = $('#sProxy').value.trim();
   const adv = readAdvisorEdit(); s.advisors = adv.length ? adv : DEFAULT_ADVISORS.map(a => ({ ...a }));
   save(); render(); toast('Settings saved.');
@@ -804,7 +913,7 @@ async function importSetup(file) {
     const data = JSON.parse(await file.text());
     if (!data.settings || !Array.isArray(data.sources)) throw new Error();
     const key = state.settings.geminiKey;
-    state = { ...fresh(), ...data, settings: { ...fresh().settings, ...data.settings, geminiKey: data.settings.geminiKey || key } };
+    state = migrateWs({ ...fresh(), ...data, settings: { ...fresh().settings, ...data.settings, geminiKey: data.settings.geminiKey || key } });
     save(); $('#settingsDlg').close(); render(); toast('Setup imported.');
   } catch (e) { toast('That file isn’t an exported setup.'); }
 }
@@ -856,6 +965,14 @@ document.addEventListener('click', e => {
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (!act) return;
   const src = current();
+  if (act === 'assess') {
+    if (!src) { overviewBrief(); return; }
+    const key = 'assess:' + src.id;
+    if (busy.has(key)) return;
+    busy.add(key); renderSheet(); renderCouncil();
+    assessOnly(src).catch(err => toast(err.message, 8000)).finally(() => { busy.delete(key); save(); render(); });
+    return;
+  }
   if (act === 'overviewBrief') overviewBrief();
   if (!src) return;
   if (act === 'sync') syncAndAnalyze(src);
@@ -905,6 +1022,34 @@ $('#directiveForm').addEventListener('submit', e => {
   const v = $('#directive').value.trim();
   if (!v || busy.has('chat')) return;
   $('#directive').value = ''; sendDirective(v);
+});
+
+/* Workspace switcher */
+function setWsMenu(open) {
+  $('#wsMenu').hidden = !open;
+  $('#wsBtn').setAttribute('aria-expanded', open);
+  if (open) renderWsMenu();
+}
+$('#wsBtn').addEventListener('click', e => { e.stopPropagation(); setWsMenu($('#wsMenu').hidden); });
+$('#wsMenu').addEventListener('click', e => {
+  e.stopPropagation();
+  const item = e.target.closest('[data-ws]');
+  if (item) { switchWs(item.dataset.ws); setWsMenu(false); }
+});
+document.addEventListener('click', () => { if (!$('#wsMenu').hidden) setWsMenu(false); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#wsMenu').hidden) { setWsMenu(false); $('#wsBtn').focus(); } });
+$('#wsNew').addEventListener('click', () => { setWsMenu(false); $('#wsForm').reset(); $('#wsDlg').showModal(); });
+$('#wsRename').addEventListener('click', () => {
+  const w = activeWs(); const n = prompt('Rename this workspace:', w.name);
+  if (n && n.trim()) { w.name = n.trim(); save(); renderWsMenu(); render(); }
+});
+$('#wsDelete').addEventListener('click', () => deleteWs(state.activeWs));
+$('#wsForm').addEventListener('submit', e => {
+  if (e.submitter?.value !== 'create') return;
+  const name = $('#wsName').value.trim(), nation = $('#wsNation').value.trim();
+  if (!name && !nation) { e.preventDefault(); toast('Give it a name or a nation.'); return; }
+  createWs(name, nation);
+  toast(`Switched to ${name || nation}.`);
 });
 
 // Remember which nations are expanded in the Order of Battle across re-renders.

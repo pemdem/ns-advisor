@@ -7,17 +7,29 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=JetBrains+Mono:wght@400;600;700&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
 <header class="banner">
-  <div class="brand">
-    <img id="flag" class="flag" alt="" hidden>
-    <div class="brand-text">
-      <div id="pretitle" class="pretitle">Office of the Head of State</div>
-      <h1 id="nationName" class="typed">Situation Room</h1>
-      <div id="motto" class="motto"></div>
-      <div id="stats" class="stats mono"></div>
+  <div class="ws">
+    <button id="wsBtn" class="ws-btn" aria-haspopup="true" aria-expanded="false" aria-controls="wsMenu" title="Switch nation or RP workspace">
+      <img id="flag" class="flag" alt="" hidden>
+      <span class="brand-text">
+        <span id="pretitle" class="pretitle">Office of the Head of State</span>
+        <span id="nationName" class="typed nation-name">Situation Room</span>
+        <span id="motto" class="motto"></span>
+        <span id="stats" class="stats mono"></span>
+      </span>
+      <span class="ws-caret" aria-hidden="true">▾</span>
+    </button>
+    <div id="wsMenu" class="ws-menu" hidden>
+      <div class="label">Switch workspace</div>
+      <ul id="wsList" class="ws-list"></ul>
+      <div class="ws-actions">
+        <button id="wsNew" class="btn amber small">+ New nation or RP</button>
+        <button id="wsRename" class="btn ghost small">Rename current</button>
+        <button id="wsDelete" class="btn ghost small">Delete current</button>
+      </div>
     </div>
   </div>
   <div class="top-actions">
@@ -28,13 +40,13 @@
 </header>
 
 <div class="layout">
-  <nav class="files" aria-label="Case files">
+  <nav class="files col" aria-label="Case files">
     <h2 class="label">Case files</h2>
     <div id="fileList" class="file-list"></div>
     <button id="addFile" class="linkish">+ New file</button>
   </nav>
 
-  <main id="file" class="sheet" aria-live="polite"></main>
+  <main id="file" class="sheet col" aria-live="polite"></main>
 
   <aside class="council" aria-label="Advisors and forces">
     <div class="panel-tabs" role="tablist" aria-label="Side panel">
@@ -42,9 +54,12 @@
       <button role="tab" id="tab-forces" aria-controls="panel-forces" data-panel="forces">Order of battle</button>
     </div>
     <div id="panel-council" role="tabpanel" aria-labelledby="tab-council" class="panel">
-      <div id="briefs"></div>
-      <div id="options" class="option-row"></div>
-      <div id="chat" class="chat"></div>
+      <h2 class="label panel-title">Council</h2>
+      <div class="panel-scroll">
+        <div id="briefs" class="briefs"></div>
+        <div id="options" class="option-row"></div>
+        <div id="chat" class="chat"></div>
+      </div>
       <form id="directiveForm" class="directive">
         <label for="directive">Your directive</label>
         <div class="row">
@@ -54,7 +69,8 @@
       </form>
     </div>
     <div id="panel-forces" role="tabpanel" aria-labelledby="tab-forces" class="panel" hidden>
-      <section id="orbat" class="orbat"></section>
+      <h2 class="label panel-title">Order of battle</h2>
+      <div class="panel-scroll"><section id="orbat" class="orbat"></section></div>
     </div>
   </aside>
 </div>
@@ -64,7 +80,8 @@
 <dialog id="settingsDlg">
   <form method="dialog" id="settingsForm" class="dlg">
     <h2 class="typed">Settings</h2>
-    <label for="sNation">Your nation</label>
+    <p class="hint">Nation, background and advisors belong to the current workspace. The Gemini key, model and proxy are shared by all of them.</p>
+    <label for="sNation">Your nation (this workspace)</label>
     <input id="sNation" placeholder="e.g. New French Union">
     <label for="sKey">Gemini API key</label>
     <input id="sKey" type="password" autocomplete="off" placeholder="Stored only in this browser">
@@ -120,6 +137,21 @@
   </form>
 </dialog>
 
-<script src="app.js?v=8"></script>
+<dialog id="wsDlg">
+  <form method="dialog" id="wsForm" class="dlg">
+    <h2 class="typed">New workspace</h2>
+    <p class="hint">One workspace per nation or RP campaign. Each keeps its own files, advisors, background and rankings.</p>
+    <label for="wsName">Workspace name</label>
+    <input id="wsName" placeholder="e.g. New French Union, or Baltic Campaign">
+    <label for="wsNation">Your nation in it</label>
+    <input id="wsNation" placeholder="NationStates name, e.g. New French Union">
+    <div class="row end">
+      <button value="cancel" class="btn ghost">Cancel</button>
+      <button value="create" class="btn dark">Create</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js?v=9"></script>
 </body>
 </html>
