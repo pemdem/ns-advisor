@@ -541,7 +541,8 @@ Allies: ${(p.allies || []).join(', ') || 'none listed'} | Rivals: ${(p.rivals ||
 Voice in RP posts: ${p.voice || 'unknown'}
 `;
 }
-async function buildProfile(nation, isOurs) {
+async function buildProfile(nation, isOurs, quiet) {
+  const say = (m, ms) => { if (!quiet) toast(m, ms); };
   state.profiles = state.profiles || {};
   const k = slug(nation), old = state.profiles[k] || {};
   const rec = { ...old, name: nation, notes: old.notes || '' };
@@ -554,7 +555,7 @@ async function buildProfile(nation, isOurs) {
       const list = [...x.querySelectorAll('DISPATCHLIST > DISPATCH')].map(d => ({ id: d.getAttribute('id'), title: xt(d, 'TITLE'), cat: xt(d, 'CATEGORY'), sub: xt(d, 'SUBCATEGORY') }))
         .sort((a, b) => (CAT_ORDER[a.cat.toLowerCase()] ?? 9) - (CAT_ORDER[b.cat.toLowerCase()] ?? 9)).slice(0, 12);
       for (let i = 0; i < list.length && budget > 0; i++) {
-        toast(`Reading ${rec.name}’s dispatches (${i + 1} of ${list.length})…`, 20000);
+        say(`Reading ${rec.name}’s dispatches (${i + 1} of ${list.length})…`, 20000);
         try {
           const dx = await nsApi({ q: 'dispatch', dispatchid: list[i].id });
           const text = cleanBB(cleanNS(xt(dx, 'TEXT'))).slice(0, Math.min(9000, budget));
@@ -568,8 +569,11 @@ async function buildProfile(nation, isOurs) {
     if (f.text && !docs.some(d => d.id && d.id === f.dispatch)) docs.push({ title: f.title || 'Factbook', cat: 'Factbook', text: f.text.slice(0, 9000), url: f.url });
   }
   const notes = (isOurs ? state.settings.lore : rec.notes || '').trim();
-  if (!docs.length && !notes) throw new Error(`No dispatches, factbooks or notes found for ${nation}. Paste some notes first.`);
-  toast(`Writing ${rec.name}’s dossier…`, 30000);
+  if (!docs.length && !notes) {
+    state.profiles[k] = { ...rec, failedAt: Date.now() }; save();
+    throw new Error(`No dispatches, factbooks or notes found for ${nation}. Paste some notes first.`);
+  }
+  say(`Writing ${rec.name}’s dossier…`, 30000);
   const out = await gemini(`You are an analyst building a dossier on the NationStates nation "${rec.name}"${rec.fullname ? ' (' + rec.fullname + ')' : ''} for a roleplay advisory app.
 Use ONLY the material below: the nation's own published dispatches and factbooks, and notes from its player. Do not invent facts. If a section has no information, give one point saying it is unknown.
 Write short bullet points, never paragraphs. Each point at most 15 words.
@@ -704,6 +708,7 @@ async function analyze(src) {
   }
   toast('Report filed.');
   loadCensus((src.military || []).map(m => m.nation));
+  autoDossiers();
 }
 
 async function syncAndAnalyze(src, { quiet } = {}) {
@@ -721,12 +726,13 @@ async function syncAndAnalyze(src, { quiet } = {}) {
   } finally { busy.delete(src.id); save(); render(); }
 }
 
-async function syncAll() {
+async function syncAll(auto) {
   const btn = $('#syncAll'); btn.disabled = true; btn.classList.add('spin');
-  await loadBanner(true);
+  await loadBanner(!auto);
   for (const s of state.sources) await syncAndAnalyze(s, { quiet: true });
   btn.disabled = false; btn.classList.remove('spin');
-  toast('All files updated.');
+  if (!auto) toast('All files updated.');
+  autoDossiers();
 }
 
 async function sendDirective(text) {
@@ -752,6 +758,35 @@ async function overviewBrief() {
   try { await assessOnly(null); }
   catch (e) { toast(e.message, 8000); }
   finally { busy.delete('overview'); save(); render(); }
+}
+
+
+/* ---------- Automatic upkeep ----------
+   Builds dossiers for every nation that appears in your files (and refreshes them weekly),
+   and pulls new reports every 15 minutes while the app is open. */
+let autoRunning = false;
+async function autoDossiers() {
+  if (autoRunning || !state.settings.geminiKey) return;
+  autoRunning = true;
+  try {
+    const names = new Map();
+    if (state.settings.nation) names.set(slug(state.settings.nation), state.settings.nation);
+    state.sources.forEach(src => (src.military || []).forEach(m => names.set(slug(m.nation), m.nation)));
+    for (const [k, name] of names) {
+      const rec = state.profiles?.[k];
+      const stale = !rec?.profile ? !(rec?.failedAt && Date.now() - rec.failedAt < 24 * 3600e3) : Date.now() - (rec.at || 0) > 7 * 24 * 3600e3;
+      if (!stale || busy.has('profile:' + k)) continue;
+      busy.add('profile:' + k);
+      try { await buildProfile(name, k === slug(state.settings.nation), true); } catch (e) { /* no material yet: retried tomorrow */ }
+      finally { busy.delete('profile:' + k); }
+      render();
+    }
+  } finally { autoRunning = false; }
+}
+async function autoRefresh() {
+  if (state.settings.autoRefresh === false || document.hidden || !state.sources.length || $('#syncAll').disabled) return;
+  if ([...busy].length) return;
+  await syncAll(true);
 }
 
 /* ---------- rendering ---------- */
@@ -1049,7 +1084,7 @@ function renderCouncil() {
 /* ---------- settings ---------- */
 function openSettings() {
   const s = state.settings;
-  $('#sNation').value = s.nation; $('#sKey').value = s.geminiKey; $('#sLore').value = s.lore; $('#sProxy').value = s.proxy;
+  $('#sNation').value = s.nation; $('#sAuto').checked = s.autoRefresh !== false; $('#sKey').value = s.geminiKey; $('#sLore').value = s.lore; $('#sProxy').value = s.proxy;
   fillModelSelect([], s.model);
   renderAdvisorEdit(s.advisors);
   $('#settingsDlg').showModal();
@@ -1074,7 +1109,7 @@ function saveSettings() {
   const ws = activeWs(), newNation = $('#sNation').value.trim();
   if (newNation && (!ws.name || ws.name === s.nation || ws.name === 'My nation' || ws.name === 'New workspace')) ws.name = newNation;
   s.nation = newNation; s.geminiKey = $('#sKey').value.trim();
-  s.model = $('#sModel').value; s.lore = $('#sLore').value; s.proxy = $('#sProxy').value.trim();
+  s.model = $('#sModel').value; s.lore = $('#sLore').value; s.autoRefresh = $('#sAuto').checked; s.proxy = $('#sProxy').value.trim();
   const adv = readAdvisorEdit(); s.advisors = adv.length ? adv : DEFAULT_ADVISORS.map(a => ({ ...a }));
   save(); render(); toast('Settings saved.');
   loadBanner(true);
@@ -1309,4 +1344,10 @@ document.addEventListener('click', e => {
 
 render();
 loadBanner(false);
+setTimeout(autoDossiers, 4000);
+setInterval(autoRefresh, 15 * 60e3);
+document.addEventListener('visibilitychange', () => {
+  // Coming back to the app after a while: catch up straight away.
+  if (!document.hidden && Date.now() - Math.max(0, ...state.sources.map(s => s.lastSync || 0)) > 15 * 60e3) autoRefresh();
+});
 if (!state.settings.geminiKey && !state.sources.length) setTimeout(openSettings, 300);
