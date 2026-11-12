@@ -197,6 +197,14 @@ async function pullRegion(src) {
 function threadUrl(src, start) {
   return `https://forum.nationstates.net/viewtopic.php?t=${src.topic}&start=${start}`;
 }
+// The NS forum shows post times like "» Fri Oct 16, 2026 8:14 pm" (board time, UTC for visitors).
+function forumDate(text) {
+  const m = String(text || '').match(/([A-Z][a-z]{2}) (\d{1,2}), (\d{4}) (\d{1,2}):(\d{2}) (am|pm)/i);
+  if (!m) return 0;
+  const mon = 'JanFebMarAprMayJunJulAugSepOctNovDec'.indexOf(m[1]) / 3;
+  let h = +m[4] % 12; if (/pm/i.test(m[6])) h += 12;
+  return mon < 0 ? 0 : Date.UTC(+m[3], mon, +m[2], h, +m[5]);
+}
 function parseForum(html) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const title = doc.querySelector('h2.topic-title, h2 a, h3.first a')?.textContent?.trim() || '';
@@ -207,7 +215,7 @@ function parseForum(html) {
     content.querySelectorAll('blockquote').forEach(q => { q.textContent = '\n[quoting] ' + q.textContent.trim().slice(0, 300) + '\n'; });
     const author = (el.querySelector('.author .username, .author .username-coloured, .author strong, a.username, a.username-coloured')?.textContent || 'Unknown').trim();
     const dt = el.querySelector('.author time')?.getAttribute('datetime');
-    return { id: 'p' + (el.id || '').replace(/\D/g, ''), time: dt ? Date.parse(dt) : 0, author, text: content.textContent.replace(/\n{3,}/g, '\n\n').trim() };
+    return { id: 'p' + (el.id || '').replace(/\D/g, ''), time: dt ? Date.parse(dt) : forumDate(el.querySelector('.author')?.textContent), author, text: content.textContent.replace(/\n{3,}/g, '\n\n').trim() };
   }).filter(p => p && p.id !== 'p');
   return { title, posts };
 }
