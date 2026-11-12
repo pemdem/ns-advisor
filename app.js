@@ -543,6 +543,8 @@ function factbookBlock(nations) {
    1. "Also known as" names found in the nation's own dispatches when its dossier is built,
    2. names you add yourself, and 3. an AI double-check of names NationStates doesn't know.
    state.aliases[slug(alias)] = { to: canonicalSlug, by: 'you' | 'ai' }; state.aliasBlock[slug] = true unlinks a name. */
+// "Confederated Kingdom of Germania" -> "Germania", so a bare RP name still matches.
+function coreName(n) { const t = cleanName(n).replace(/^the\s+/i, ''); const i = t.toLowerCase().lastIndexOf(' of '); return i > 0 ? t.slice(i + 4) : t; }
 function canonKey(name) {
   const k = slug(cleanName(name));
   if (!k) return k;
@@ -551,7 +553,7 @@ function canonKey(name) {
   if (state.profiles?.[k]?.profile) return k;
   if (!state.aliasBlock?.[k]) {
     for (const [pk, rec] of Object.entries(state.profiles || {})) {
-      if ((rec.profile?.aka || []).some(x => slug(x) === k)) return pk;
+      if ((rec.profile?.aka || []).some(x => slug(x) === k || slug(coreName(x)) === k)) return pk;
     }
   }
   return k;
@@ -689,7 +691,7 @@ Reply with JSON only:
 "figures":[{"name":"person","role":"their role"}],
 "allies":["nation names"],"rivals":["nation names"],
 "voice":"how this nation writes its RP posts: tone, register, formatting habits, recurring phrases; at most 40 words",
-"aka":["every other name this nation goes by in RP or its dispatches: its in-character country name, short names, former names (not demonyms, not allies)"]}
+"aka":["other names for THIS SAME nation used in its RP or dispatches: its in-character country name and short forms. Not demonyms, not allies, rivals or other countries"]}
 "RP style" means how the player writes and roleplays this nation: post length, formality, in-character conventions, use of news reports or press releases, and so on.`);
   const list = (x, n) => (Array.isArray(x) ? x : []).map(String).filter(Boolean).slice(0, n);
   rec.profile = {
