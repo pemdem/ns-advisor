@@ -327,3 +327,91 @@ label.inline{font-size:13px;font-weight:700}
 .mini-deck{padding-bottom:8px}
 .mini-deck.dossier{margin-left:0;align-self:center}
 .dossier-id{flex:1 1 380px}
+
+/* ===================== Phones ===================== */
+.mobile-tabs{display:none}
+@media (max-width:720px){
+  html,body{overflow-x:hidden}
+  body{padding-bottom:calc(64px + env(safe-area-inset-bottom))}
+  input,select,textarea{font-size:16px} /* stops iOS zooming into fields */
+
+  /* Bottom tab bar: one section at a time */
+  .mobile-tabs{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:25;background:var(--desk3);border-top:2px solid var(--amber);padding-bottom:env(safe-area-inset-bottom)}
+  .mobile-tabs button{flex:1;min-height:58px;background:none;border:0;color:var(--dim);font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+  .mobile-tabs .mt-icon{font-size:16px;line-height:1}
+  .mobile-tabs button.on{color:var(--amber);background:var(--desk2)}
+  body[data-mview="report"] .council{display:none}
+  body[data-mview="council"] .files,body[data-mview="council"] .sheet,
+  body[data-mview="forces"] .files,body[data-mview="forces"] .sheet{display:none}
+  .panel-tabs{display:none}
+  .panel-title{display:block;font-size:12px}
+  #toast{bottom:calc(76px + env(safe-area-inset-bottom))}
+
+  /* Compact banner: flag, name and your-nations deck on one line */
+  .banner{padding:6px 10px calc(6px) 10px;gap:6px;padding-top:calc(6px + env(safe-area-inset-top))}
+  .ws{width:100%;flex-wrap:nowrap;gap:6px}
+  .ws-btn{flex:1;min-width:0;padding:2px 4px 2px 2px;gap:8px}
+  .flag{height:34px;max-width:52px;box-shadow:2px 2px 0 #000}
+  .pretitle{font-size:9px}
+  .nation-name{font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .motto,.stats{display:none}
+  .ws-menu{width:calc(100vw - 20px)}
+  .ws-deck .mini-deck{padding-bottom:0}
+  .ws-deck .md-arrow,.ws-deck .md-count,.ws-deck .md-name{display:none}
+  .ws-deck .md-stack{width:calc(52px + (var(--count) - 1) * 8px);height:40px}
+  .ws-deck .md-card{width:52px;height:40px;padding:4px;left:calc(var(--i) * 8px);justify-content:center}
+  .ws-deck .md-card img,.ws-deck .md-init{width:40px;height:28px}
+  .top-actions{width:100%;flex-wrap:nowrap;gap:8px}
+  .top-actions .btn{min-height:40px}
+  .top-actions .btn.amber{flex:1}
+  #nationLine{display:none}
+
+  /* Layout */
+  .layout{grid-template-columns:minmax(0,1fr);padding:10px;gap:10px}
+  .files{flex-direction:row;align-items:center;gap:8px}
+  .files .label{display:none}
+  .file-list{flex-direction:row;overflow-x:auto;gap:6px;flex:1;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .file-list::-webkit-scrollbar{display:none}
+  .file-tab{width:auto;flex:0 0 auto;max-width:170px;min-height:40px}
+  .file-tab .kind{display:none}
+  #addFile{flex:0 0 auto;white-space:nowrap;min-height:40px}
+  .sheet{padding:12px;box-shadow:3px 3px 0 #000;gap:10px}
+  .sheet-head{gap:8px;padding-bottom:8px}
+  .sheet-head h2{font-size:21px}
+  .sheet-actions{width:100%}
+  .sheet-actions .btn{flex:1 1 auto;min-height:42px;padding:0 10px}
+  .more{flex:0 0 auto}
+
+  /* Dossier on a phone */
+  .dossier-id{flex:1 1 100%;align-items:flex-start;gap:10px}
+  .dossier-flag{height:34px;max-width:52px;box-shadow:2px 2px 0 var(--line)}
+  .dossier-name{gap:4px 10px}
+  .aka.paper{flex-wrap:nowrap;overflow-x:auto;max-width:calc(100vw - 110px);scrollbar-width:none;padding-bottom:2px}
+  .aka.paper::-webkit-scrollbar{display:none}
+  .aka-chip{white-space:nowrap;flex:0 0 auto}
+  .aka-add{flex:0 0 auto}
+  .mini-deck.dossier{width:100%;justify-content:space-between}
+  .mini-deck.dossier .md-stack{flex:1;width:auto;max-width:calc(100% - 110px)}
+  .mini-deck.dossier .md-card{width:calc(100% - (var(--count) - 1) * 10px)}
+  .dossier-grid{grid-template-columns:minmax(0,1fr);gap:8px}
+  .dcard ul{font-size:14px}
+  .notes textarea{min-height:160px}
+
+  /* Report pieces */
+  .assess-top .btn{margin-left:0}
+  .headline{font-size:18px}
+  .event .no{flex-basis:22px;font-size:14px}
+  .event-more{padding-left:30px}
+  .drafter .row{flex-wrap:wrap}
+  .drafter .row .btn.red{margin-left:0;flex:1}
+
+  /* Council: directive box stays above the tab bar */
+  .council{gap:8px}
+  .directive{position:sticky;bottom:calc(64px + env(safe-area-inset-bottom));background:var(--desk);padding:8px 0;z-index:4}
+  .memo .text{font-size:15px}
+
+  /* Dialogs fill the screen */
+  dialog{max-width:100vw;width:100vw;max-height:100dvh;margin:0;height:100dvh;border:0;box-shadow:none}
+  .dlg{padding:16px 14px calc(24px + env(safe-area-inset-bottom))}
+  .more .menu{right:0;min-width:200px}
+}

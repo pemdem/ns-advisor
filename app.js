@@ -906,8 +906,15 @@ function render() {
 
 /* Side panel tabs: Council | Order of battle */
 let uiPanel = 'council';
+let uiMobileView = 'report'; // phones show one section at a time: report | council | forces
+const isPhone = () => window.matchMedia('(max-width: 720px)').matches;
 let uiPaste = null;
 function renderPanels() {
+  document.body.dataset.mview = uiMobileView;
+  document.querySelectorAll('.mobile-tabs [data-mview]').forEach(b => {
+    const on = b.dataset.mview === uiMobileView; b.classList.toggle('on', on); b.setAttribute('aria-current', on);
+  });
+  if (isPhone() && uiMobileView !== 'report') uiPanel = uiMobileView;
   document.querySelectorAll('.panel-tabs [data-panel]').forEach(b => {
     const on = b.dataset.panel === uiPanel;
     b.setAttribute('aria-selected', on); b.classList.toggle('on', on); b.tabIndex = on ? 0 : -1;
@@ -1382,11 +1389,13 @@ function addFile() {
 document.addEventListener('click', e => {
   const deckBtn = e.target.closest('[data-deck]');
   if (deckBtn) { e.stopPropagation(); deckMove(deckBtn.dataset.deck, Number(deckBtn.dataset.step || 1), deckBtn.dataset.to); return; }
+  const mtab = e.target.closest('[data-mview]');
+  if (mtab) { uiMobileView = mtab.dataset.mview; renderPanels(); window.scrollTo({ top: 0 }); return; }
   const ptab = e.target.closest('[data-panel]');
   if (ptab) { uiPanel = ptab.dataset.panel; renderPanels(); return; }
   if (e.target.closest('.menu button')) e.target.closest('details.more')?.removeAttribute('open');
   const tab = e.target.closest('[data-tab]');
-  if (tab) { state.selected = tab.dataset.tab; save(); render(); $('#file').scrollIntoView({ block: 'nearest' }); return; }
+  if (tab) { state.selected = tab.dataset.tab; uiMobileView = 'report'; save(); render(); $('#file').scrollIntoView({ block: 'nearest' }); return; }
   const opt = e.target.closest('[data-option]');
   if (opt) { if (!busy.has('chat')) sendDirective('I’m considering: ' + opt.dataset.option + '. Advise me.'); return; }
   const prof = e.target.closest('[data-profile]');
@@ -1395,6 +1404,7 @@ document.addEventListener('click', e => {
     state.profiles = state.profiles || {};
     state.profiles[k] = state.profiles[k] || { name: prof.dataset.profile, notes: '' };
     state.selected = k === slug(state.settings.nation) ? 'dossier' : 'nation:' + k;
+    uiMobileView = 'report';
     save(); render(); $('#file').scrollTop = 0; return;
   }
   const akaAdd = e.target.closest('[data-aliasadd]');
@@ -1570,6 +1580,19 @@ document.addEventListener('input', e => {
   if (e.target.id === 'notesBox') { const c = $('#notesCount'); if (c) c.textContent = e.target.value.length.toLocaleString() + ' characters (unsaved)'; }
   if (e.target.id === 'draftOut') { const src = current(); if (src?.draft) src.draft.post = e.target.value; }
 });
+
+// Phones: swipe left/right on a dossier to deal the next nation.
+(() => {
+  let x0 = null, y0 = null;
+  const sheet = $('#file');
+  sheet.addEventListener('touchstart', e => { const t = e.touches[0]; x0 = t.clientX; y0 = t.clientY; }, { passive: true });
+  sheet.addEventListener('touchend', e => {
+    if (x0 === null) return;
+    const t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0; x0 = null;
+    const onDossier = state.selected === 'dossier' || String(state.selected).startsWith('nation:');
+    if (onDossier && Math.abs(dx) > 70 && Math.abs(dy) < 50 && !e.target.closest('textarea, input, .aka')) deckMove('dossier', dx < 0 ? 1 : -1);
+  }, { passive: true });
+})();
 
 // Remember which nations are expanded in the Order of Battle across re-renders.
 document.addEventListener('toggle', e => {
