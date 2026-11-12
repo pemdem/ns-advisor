@@ -826,7 +826,8 @@ function renderOrbat() {
     ${src ? `<div class="row wrap orbat-actions">
       <button class="btn ghost small" data-act="reassess" ${busy.has('mil') ? 'disabled' : ''}>${busy.has('mil') ? '<span class="spin">Assessing</span>' : 'Reassess'}</button>
       <button class="btn ghost small" data-act="track">+ Nation</button>
-    </div>` : ''}`;
+    </div>` : ''}
+    ${rows.some(m => !state.profiles?.[slug(m.nation)]?.profile) ? `<button class="btn ghost small" data-act="buildAll" ${busy.has('buildAll') ? 'disabled' : ''}>${busy.has('buildAll') ? '<span class="spin">Building dossiers</span>' : 'Build missing dossiers'}</button>` : ''}`;
 }
 
 /* NationStates-style banner for the leader's own nation */
@@ -1161,6 +1162,18 @@ document.addEventListener('click', e => {
     return;
   }
   if (act === 'overviewBrief') overviewBrief();
+  if (act === 'buildAll') {
+    if (!state.settings.geminiKey) { toast('Add your Gemini key in Settings first.'); return; }
+    if (busy.has('buildAll')) return;
+    const names = orbatList().list.map(m => m.nation).filter(n => !state.profiles?.[slug(n)]?.profile);
+    busy.add('buildAll'); renderOrbat();
+    (async () => {
+      const failed = [];
+      for (const n of names) { try { await buildProfile(n, slug(n) === slug(state.settings.nation)); } catch (err) { failed.push(n); } }
+      toast(failed.length ? `Built ${names.length - failed.length}. No dispatches found for: ${failed.join(', ')} (paste notes on their dossier).` : `Built ${names.length} dossier${names.length === 1 ? '' : 's'}.`, 9000);
+    })().finally(() => { busy.delete('buildAll'); render(); });
+    return;
+  }
   if (act === 'saveNotes' || act === 'saveNotesBuild') {
     const box = $('#notesBox');
     if (box) {
