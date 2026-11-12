@@ -418,3 +418,6 @@ label.inline{font-size:13px;font-weight:700}
 @media (max-width:999px){
   .panel,.panel-scroll{flex:none;min-height:auto;overflow:visible}
 }
+@media (max-width:720px){
+  .directive{position:static;background:none;padding:4px 0 0}
+}
