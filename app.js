@@ -546,6 +546,7 @@ async function buildProfile(nation, isOurs, quiet) {
   state.profiles = state.profiles || {};
   const k = slug(nation), old = state.profiles[k] || {};
   const rec = { ...old, name: nation, notes: old.notes || '' };
+  const notesAtStart = (isOurs ? state.settings.lore : rec.notes || '').trim(); // read now: the workspace may change while we fetch
   let docs = [], budget = 90000;
   // 1. The nation's own dispatches, factbooks first.
   try {
@@ -568,7 +569,7 @@ async function buildProfile(nation, isOurs, quiet) {
   for (const f of state.factbooks?.[k] || []) {
     if (f.text && !docs.some(d => d.id && d.id === f.dispatch)) docs.push({ title: f.title || 'Factbook', cat: 'Factbook', text: f.text.slice(0, 9000), url: f.url });
   }
-  const notes = (isOurs ? state.settings.lore : rec.notes || '').trim();
+  const notes = notesAtStart;
   if (!docs.length && !notes) {
     state.profiles[k] = { ...rec, failedAt: Date.now() }; save();
     throw new Error(`No dispatches, factbooks or notes found for ${nation}. Paste some notes first.`);
