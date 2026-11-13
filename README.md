@@ -2,7 +2,7 @@
 
 A NationStates advisor dashboard: it reads your nation, region and RP threads, and a council of AI advisors (Google Gemini) briefs you, ranks the militaries in your RPs, builds dossiers on every nation and drafts your in-character replies.
 
-**Use it here:** https://pemdem.github.io/ns-advisor/
+**Use it here:** https://ns-advisor.pages.dev/
 
 © 2026 pemdem. All rights reserved. This is proprietary software, offered for personal use of the hosted app only. Copying, re-hosting, modifying or redistributing the code is not permitted. See [LICENSE](LICENSE).
 
