@@ -422,3 +422,9 @@ label.inline{font-size:13px;font-weight:700}
 @media (max-width:720px){
   .directive{position:static;background:none;padding:4px 0 0}
 }
+
+/* Banner shown only on the old address */
+.moved-bar{position:relative;z-index:30;display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:10px 16px;background:var(--stamp);color:var(--note);font-size:14px;line-height:1.4}
+.moved-bar a{color:#fff;text-decoration:underline}
+.moved-bar .moved-actions{display:flex;flex-wrap:wrap;gap:8px;margin-left:auto}
+.moved-bar .btn.ghost{color:#fff;border-color:#fff;text-decoration:none}

@@ -1611,6 +1611,20 @@ document.addEventListener('click', e => {
   document.querySelectorAll('details.more[open]').forEach(d => { if (!d.contains(e.target)) d.removeAttribute('open'); });
 });
 
+/* The app moved to Cloudflare Pages. Browser data is tied to the website address, so the old
+   GitHub Pages address shows a banner with a one-click export to carry everything over. */
+const NEW_HOME = 'https://ns-advisor.pages.dev/';
+if (location.hostname === 'pemdem.github.io') {
+  const bar = document.createElement('div');
+  bar.className = 'moved-bar';
+  bar.setAttribute('role', 'alert');
+  bar.innerHTML = `<b>This app has moved to <a href="${NEW_HOME}">ns-advisor.pages.dev</a>.</b>
+    <span>Your data is saved per website, so bring it with you: 1) Export here, 2) open the new link, 3) Settings \u203a Import setup (choose Merge). Re-enter your Gemini key there.</span>
+    <span class="moved-actions"><button class="btn amber small" id="movedExport">1. Export my setup</button><a class="btn ghost small" href="${NEW_HOME}">2. Open the new app</a></span>`;
+  document.body.prepend(bar);
+  $('#movedExport').addEventListener('click', exportSetup);
+}
+
 normalizeAllMilitary();
 render();
 loadBanner(false);
