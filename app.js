@@ -140,7 +140,13 @@ const current = () => state.sources.find(s => s.id === state.selected) || null;
 
 /* ---------- network ---------- */
 async function getText(url) {
-  // Try directly first; fall back to the user's proxy if the browser blocks it (CORS).
+  // The forum never allows cross-site reads, so it always goes through the proxy.
+  if (/^https:\/\/forum\.nationstates\.net\//.test(url) && state.settings.proxy.trim()) {
+    const r = await fetch(state.settings.proxy.trim() + encodeURIComponent(url));
+    if (!r.ok) throw new Error('Proxy returned ' + r.status);
+    return await r.text();
+  }
+  // Everything else: try directly first; fall back to the proxy if the browser blocks it (CORS).
   try {
     const r = await fetch(url);
     if (r.ok) return await r.text();
