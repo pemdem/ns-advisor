@@ -1396,7 +1396,7 @@ function addFile() {
 document.addEventListener('click', e => {
   const deckBtn = e.target.closest('[data-deck]');
   if (deckBtn) { e.stopPropagation(); deckMove(deckBtn.dataset.deck, Number(deckBtn.dataset.step || 1), deckBtn.dataset.to); return; }
-  const mtab = e.target.closest('[data-mview]');
+  const mtab = e.target.closest('.mobile-tabs [data-mview]'); // not <body>, which also carries data-mview
   if (mtab) { uiMobileView = mtab.dataset.mview; renderPanels(); window.scrollTo({ top: 0 }); return; }
   const ptab = e.target.closest('[data-panel]');
   if (ptab) { uiPanel = ptab.dataset.panel; renderPanels(); return; }
