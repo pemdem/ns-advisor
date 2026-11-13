@@ -1,4 +1,5 @@
 'use strict';
+/* © 2026 pemdem. All rights reserved. Proprietary: see LICENSE. Copying, re-hosting or redistribution is not permitted. */
 /* Office of the Head of State — a NationStates advisor dashboard.
    Everything is stored in this browser (localStorage). Nothing is sent anywhere
    except NationStates (to read data) and Google Gemini (for the advisors). */

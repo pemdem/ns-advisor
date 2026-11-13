@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://www.nationstates.net https://*.nationstates.net; connect-src https://www.nationstates.net https://generativelanguage.googleapis.com https://ns-forum-proxy.demariepeter7.workers.dev; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="copyright" content="© 2026 pemdem. All rights reserved.">
 <meta name="theme-color" content="#0f1511">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -11,7 +14,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=JetBrains+Mono:wght@400;600;700&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=23">
+<link rel="stylesheet" href="style.css?v=24">
 </head>
 <body>
 <header class="banner">
@@ -121,6 +124,7 @@
       </div>
       <p class="hint">Export saves your files, event chains and advisors (not your API key) to a file you can import on your phone or laptop.</p>
     </fieldset>
+    <p class="hint">© 2026 pemdem. All rights reserved. Personal use of this hosted app only; copying, re-hosting or redistributing the code is not permitted.</p>
     <div class="row end">
       <button value="cancel" class="btn ghost">Close</button>
       <button id="saveSettings" value="save" class="btn dark">Save</button>
@@ -164,6 +168,6 @@
   </form>
 </dialog>
 
-<script src="app.js?v=23"></script>
+<script src="app.js?v=24"></script>
 </body>
 </html>
