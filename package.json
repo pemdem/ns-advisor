@@ -1,0 +1,12 @@
+{
+  "name": "ns-advisor",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Office of the Head of State. Proprietary, all rights reserved.",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "devDependencies": {
+    "javascript-obfuscator": "^4.1.1"
+  }
+}
