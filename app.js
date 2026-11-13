@@ -11,7 +11,7 @@ const DEFAULT_ADVISORS = [
   { role: 'Intelligence Chief', persona: 'Skeptical analyst. Separates confirmed facts from claims, flags deception and unknowns.' },
   { role: 'Minister of the Economy', persona: 'Pragmatic economist. Budgets, trade, sanctions, domestic stability.' }
 ];
-const DEFAULT_PROXY = 'https://ns-forum-proxy.demariepeter7.workers.dev/?url=';
+const DEFAULT_PROXY = '/api/forum?url='; // same-site forum reader (functions/api/forum.js)
 const TYPE_LABEL = { nation: 'NATION', region: 'REGION', thread: 'RP', paste: 'INTEL' };
 const MAX_RAW = 400, MAX_SEEN = 3000, MAX_EVENTS = 300, CHUNK_CHARS = 120000;
 
@@ -48,7 +48,7 @@ function migrateWs(st) {
     st.activeWs = id;
   }
   if (!st.workspaces.some(w => w.id === st.activeWs)) st.activeWs = st.workspaces[0].id;
-  if (!st.settings.proxy) st.settings.proxy = DEFAULT_PROXY;
+  if (!st.settings.proxy || /workers\.dev/.test(st.settings.proxy)) st.settings.proxy = DEFAULT_PROXY;
   return st;
 }
 function save() {
@@ -172,7 +172,7 @@ async function nsApi(params) {
   catch (e) {
     if (e.status === 404) throw new Error('NationStates couldn’t find that name.');
     if (e.status === 429) throw new Error('NationStates rate limit hit. Wait 30 seconds and try again.');
-    if (e.blocked) throw new Error('Your browser blocked the NationStates request. Add a proxy in Settings.');
+    if (e.blocked) throw new Error('Your browser blocked the NationStates request. Check your connection and try again.');
     throw e;
   }
   return new DOMParser().parseFromString(txt, 'text/xml');
@@ -235,7 +235,7 @@ async function pullThread(src) {
     src.topic = u.searchParams.get('t');
     if (!src.topic) {
       // A post link (?p=123): open it once and find the topic id.
-      const html = await getText(src.target).catch(e => { throw e.blocked ? new Error('Reading the forum needs a proxy. Add one in Settings (see README).') : e; });
+      const html = await getText(src.target).catch(e => { throw e.blocked ? new Error('Couldn’t reach the forum reader. Try again in a minute.') : e; });
       const m = html.match(/viewtopic\.php\?[^"']*\bt=(\d+)/);
       if (!m) throw new Error('Couldn’t find the thread in that link. Use a link with t= in it.');
       src.topic = m[1];
@@ -246,7 +246,7 @@ async function pullThread(src) {
   for (let i = 0; i < 12; i++) {
     let html;
     try { html = await getText(threadUrl(src, start)); }
-    catch (e) { throw e.blocked ? new Error('Reading the forum needs a proxy. Add one in Settings (see README).') : e; }
+    catch (e) { throw e.blocked ? new Error('Couldn’t reach the forum reader. Try again in a minute.') : e; }
     const { title, posts } = parseForum(html);
     if (title && !src.threadTitle) src.threadTitle = title;
     if (!posts.length) break;
@@ -1288,7 +1288,7 @@ function renderCouncil() {
 /* ---------- settings ---------- */
 function openSettings() {
   const s = state.settings;
-  $('#sNation').value = s.nation; $('#sAuto').checked = s.autoRefresh !== false; $('#sKey').value = s.geminiKey; $('#sLore').value = s.lore; $('#sProxy').value = s.proxy;
+  $('#sNation').value = s.nation; $('#sAuto').checked = s.autoRefresh !== false; $('#sKey').value = s.geminiKey; $('#sLore').value = s.lore;
   fillModelSelect([], s.model);
   renderAdvisorEdit(s.advisors);
   $('#settingsDlg').showModal();
@@ -1313,7 +1313,7 @@ function saveSettings() {
   const ws = activeWs(), newNation = $('#sNation').value.trim();
   if (newNation && (!ws.name || ws.name === s.nation || ws.name === 'My nation' || ws.name === 'New workspace')) ws.name = newNation;
   s.nation = newNation; s.geminiKey = $('#sKey').value.trim();
-  s.model = $('#sModel').value; s.lore = $('#sLore').value; s.autoRefresh = $('#sAuto').checked; s.proxy = $('#sProxy').value.trim();
+  s.model = $('#sModel').value; s.lore = $('#sLore').value; s.autoRefresh = $('#sAuto').checked;
   const adv = readAdvisorEdit(); s.advisors = adv.length ? adv : DEFAULT_ADVISORS.map(a => ({ ...a }));
   save(); render(); toast('Settings saved.');
   loadBanner(true);
